@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Nuclei adapter — template-based vulnerability detection (v2.00).
+"""Nuclei adapter — template-based vulnerability detection (v3.00).
 
 Runs the real Nuclei binary when installed, in detection-only
 mode: `-severity low,medium,high,critical -exclude-tags dos

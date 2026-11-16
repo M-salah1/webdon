@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Scoring — one place where a score comes from (WEBDON v2.00 HIVE).
+"""Scoring — one place where a score comes from (WEBDON v3.00 HIVE).
 
 Four separate metrics, each measured, none of them a guess:
 
@@ -21,10 +21,13 @@ WEIGHTS_INDICATOR = {"critical": 12, "high": 7, "medium": 4,
 
 # Engine outcomes that count as "done": the engine ran and gave a
 # definitive answer. Fallbacks (external tool missing, built-in
-# equivalent ran instead) and honest skips (no schema supplied)
-# are done work, not failures — only timeout/error are not done.
+# equivalent ran instead), honest skips (no schema supplied),
+# bridges (the real tool runs on a PC/server, not here) and honest
+# not_applicable answers (e.g. not a Windows/AD host) are done
+# work, not failures — only timeout/error are not done.
 DONE_STATUSES = {"completed", "not_installed (fallback)", "fallback",
-                 "skipped", "skipped_no_schema", "not_installed"}
+                 "skipped", "skipped_no_schema", "not_installed",
+                 "bridge", "not_applicable"}
 
 
 def grade_for(score):

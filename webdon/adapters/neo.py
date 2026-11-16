@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Neo cloud hook — export findings for the external platform (v2.00).
+"""Neo cloud hook — export findings for the external platform (v3.00).
 
   * `neo export` always works: writes findings JSON for upload to
     the Neo platform (external / cloud).
@@ -25,7 +25,7 @@ def export_findings(scan, out_path="webdon-neo-export.json"):
     """Write a sanitized findings export. Returns the path."""
     from . import sanitize
     payload = sanitize({
-        "tool": "WEBDON v2.00 HIVE",
+        "tool": "WEBDON v3.00 HIVE",
         "target": scan.get("target"),
         "score": scan.get("score"),
         "grade": scan.get("grade"),
@@ -57,7 +57,7 @@ def push(scan, opener=None):
                                         "environment"})
     from . import sanitize
     payload = json.dumps(sanitize({
-        "tool": "WEBDON v2.00 HIVE", "target": scan.get("target"),
+        "tool": "WEBDON v3.00 HIVE", "target": scan.get("target"),
         "score": scan.get("score"), "grade": scan.get("grade"),
         "findings": scan.get("findings") or [],
     }), ensure_ascii=False).encode("utf-8")

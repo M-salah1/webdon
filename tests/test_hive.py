@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""WEBDON v2.00 HIVE tests — run: python3 -m unittest discover -s tests -v
+"""WEBDON v3.00 NET tests — run: python3 -m unittest discover -s tests -v
 
 Covers: hive phase counts and scope enforcement, adapter
 argument construction (Nuclei excludes dos, Naabu fallback flag,
@@ -42,14 +42,14 @@ def _ctx(url="http://127.0.0.1:9", authorized=True):
 
 class TestVersion(unittest.TestCase):
     def test_version_is_2_00(self):
-        self.assertEqual(__version__, "2.00")
+        self.assertEqual(__version__, "3.00")
 
 
 class TestHiveStructure(unittest.TestCase):
     def test_hive_has_40_plus_phases(self):
-        self.assertGreaterEqual(hive_mod.total_phases(), 40)
-        self.assertEqual(len(PROFILES["hive"]), 19)
-        self.assertEqual(len(hive_mod.wave_names()), 5)
+        self.assertGreaterEqual(hive_mod.total_phases(), 55)
+        self.assertEqual(len(PROFILES["hive"]), 24)
+        self.assertEqual(len(hive_mod.wave_names()), 6)
 
     def test_hive_refuses_without_scope(self):
         with tempfile.TemporaryDirectory() as d:
@@ -293,14 +293,14 @@ class TestHiveLab(unittest.TestCase):
             scan = hive_mod.run_hive(
                 base, scope=scope,
                 settings={"scan_budget_s": 180})
-            self.assertEqual(scan["tool"], "WEBDON v2.00")
+            self.assertEqual(scan["tool"], "WEBDON v3.00")
             self.assertEqual(scan["kind"], "webdon-hive")
             self.assertEqual(scan["profile"], "hive")
             self.assertIsNotNone(scan["score"])
             self.assertGreaterEqual(
-                scan["coverage"]["phases_done"], 40)
-            self.assertEqual(scan["hive"]["phases"], 45)
-            self.assertEqual(len(scan["hive"]["waves"]), 5)
+                scan["coverage"]["phases_done"], 55)
+            self.assertEqual(scan["hive"]["phases"], 56)
+            self.assertEqual(len(scan["hive"]["waves"]), 6)
             adapters = scan["hive"]["adapters"]
             self.assertEqual(adapters["nuclei"]["status"],
                              "not_installed (fallback)")

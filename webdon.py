@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""WEBDON v2.00 HIVE — entry point.
+"""WEBDON v3.00 HIVE — entry point.
 
 Terminal console (Arabic / French / English) + direct scan mode.
     python3 webdon.py                                  # console
@@ -22,9 +22,12 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from webdon import __version__  # noqa: E402
+from webdon.adapters import bloodhound as bloodhound_mod  # noqa: E402
 from webdon.adapters import burp as burp_mod  # noqa: E402
 from webdon.adapters import manager as tools_mod  # noqa: E402
 from webdon.adapters import neo as neo_mod  # noqa: E402
+from webdon.adapters import netexec as netexec_mod  # noqa: E402
+from webdon.adapters import openvas as openvas_mod  # noqa: E402
 from webdon.adapters import zap as zap_mod  # noqa: E402
 from webdon.core import engine as engine_mod  # noqa: E402
 from webdon.core import hive as hive_mod  # noqa: E402
@@ -52,12 +55,12 @@ WEBDON_BANNER = r"""
 
 WELCOME = {
     "ar": [
-        "WEBDON v2.00 HIVE — أداة فحص المواقع الثقيلة",
+        "WEBDON v3.00 HIVE — أداة فحص المواقع الثقيلة",
         "نظام التحقيق الدفاعي الشامل — FOX COMPANY",
         "المطور: حافظ مهدي صلاح الدين — الجزائر",
         "",
         "ماذا تفعل الأداة؟",
-        "• 19 محركاً + خلية HIVE: ضع الرابط فقط وتعمل كل الأدوات",
+        "• 24 محركاً + خلية HIVE: ضع الرابط فقط وتعمل كل الأدوات",
         "  التقنيات، الزحف والمسارات، ملفات الإعداد المكشوفة،",
         "  الكوكيز، CORS، المنافذ، متابعة الـ IP وحده، الحمايات،",
         "  والخط الزمني — مع التحقق من كلمات السر المسرّبة (HIBP)",
@@ -76,12 +79,12 @@ WELCOME = {
         "والأداة تُبلغ عنها UNKNOWN ولا تخترع أرقاماً أبداً.",
     ],
     "en": [
-        "WEBDON v2.00 HIVE — Heavy Website Investigation Tool",
+        "WEBDON v3.00 HIVE — Heavy Website Investigation Tool",
         "Comprehensive defensive audit system — FOX COMPANY",
         "Developer: Hafed Mehdi Salah Eddine — Algeria",
         "",
         "What does it do?",
-        "• 19 engines + HIVE: give only the URL, every tool runs",
+        "• 24 engines + HIVE: give only the URL, every tool runs",
         "  headers, technologies, crawl & paths, exposed config files,",
         "  cookies, CORS, ports, IP follow-up alone, protections,",
         "  and timeline — plus leaked-password verification (HIBP)",
@@ -101,12 +104,12 @@ WELCOME = {
         "numbers.",
     ],
     "fr": [
-        "WEBDON v2.00 HIVE — Outil lourd d'investigation de sites web",
+        "WEBDON v3.00 HIVE — Outil lourd d'investigation de sites web",
         "Système complet d'audit défensif — FOX COMPANY",
         "Développeur : Hafed Mehdi Salah Eddine — Algérie",
         "",
         "Que fait l'outil ?",
-        "• 19 moteurs + HIVE : donnez seulement l'URL, tout tourne",
+        "• 24 moteurs + HIVE : donnez seulement l'URL, tout tourne",
         "  technologies, crawl et chemins, fichiers de config exposés,",
         "  cookies, CORS, ports, suivi de l'IP seule, protections,",
         "  chronologie — plus vérification des mots de passe fuités (HIBP)",
@@ -287,7 +290,7 @@ def record_scan_traffic(scan):
 
 
 def do_hive(url, lang, scope, settings, schema_path=None):
-    """HIVE: one command runs all five waves. Scope-gated."""
+    """HIVE: one command runs all six waves. Scope-gated."""
     url = normalize_url(url)
     if not valid_url(url):
         print(t(lang, "invalid_url"))
@@ -357,6 +360,125 @@ def tools_cmd(arg, lang):
                 print("Run manually: %s" % res["manual_command"])
         return
     print("tools list | tools check <name> | tools install <name>")
+
+
+def openvas_cmd(arg, lang, scope):
+    """openvas export <url> | openvas run <url>"""
+    parts = arg.split(None, 1)
+    if len(parts) != 2 or parts[0] not in ("export", "run"):
+        print("openvas export <url> | openvas run <url>")
+        print("OpenVAS/GVM is a server — it cannot run inside Termux.")
+        print("export writes a ready task for a PC/server; run needs")
+        print("GVM_HOST + GVM_USER in the environment and gvm-cli.")
+        return
+    url = normalize_url(parts[1])
+    if not valid_url(url):
+        print(t(lang, "invalid_url"))
+        return
+    if not scope.is_authorized(url):
+        print(t(lang, "scope_required"))
+        return
+    host = url.split("/")[2]
+    domain = host.split(":")[0]
+    ips = resolve_ips(domain if "." in domain else host)
+    ip = ips[0] if ips else ""
+    if parts[0] == "export":
+        task_path, plan_path = openvas_mod.export_task(url, ip)
+        print("Saved: %s" % task_path)
+        print("Saved: %s" % plan_path)
+        print("Import the task into Greenbone (GVM) on a server/PC.")
+        return
+    gvm_host = os.environ.get("GVM_HOST")
+    gvm_user = os.environ.get("GVM_USER")
+    if not gvm_host or not gvm_user:
+        print("openvas run needs GVM_HOST + GVM_USER in the environment.")
+        print("Example: export GVM_HOST=192.168.1.10 GVM_USER=admin")
+        return
+    try:
+        password = getpass.getpass("GVM password for %s: " % gvm_user)
+    except (EOFError, KeyboardInterrupt):
+        return
+    if not password:
+        print("no password given — aborted")
+        return
+    try:
+        res = openvas_mod.run_gvm_task(gvm_host, gvm_user, password, ip)
+    finally:
+        password = ""
+    print("OpenVAS: %s" % res.get("status"))
+    for key, val in (res.get("data") or {}).items():
+        print("  %s: %s" % (key, val))
+
+
+def netexec_cmd(arg, lang, scope):
+    """netexec run <ip> — explicit opt-in, anonymous/guest only."""
+    parts = arg.split()
+    if len(parts) != 2 or parts[0] != "run":
+        print("netexec run <ip>")
+        print("Anonymous/guest enumeration only — no passwords, no")
+        print("spraying, no brute force. Runs only when the target")
+        print("shows Windows/AD indicators (ports 88/389/445/...).")
+        return
+    ip = parts[1]
+    url = "http://%s/" % ip
+    if not scope.is_authorized(url):
+        print(t(lang, "scope_required"))
+        return
+    ctx = {"url": url, "host": ip, "domain": ip, "authorized": True,
+           "timeout": 8, "ips": [ip], "pages": [], "scripts": []}
+    ctx["ports_data"] = BY_NAME["ports"].run(ctx).get("data") or {}
+    res = netexec_mod.run_explicit(ctx)
+    print("NetExec: %s" % res.get("status"))
+    data = res.get("data") or {}
+    for key in ("note", "error"):
+        if data.get(key):
+            print("  %s" % data[key])
+    if (data.get("indicators") or {}).get("evidence"):
+        print("  indicators: %s" % data["indicators"]["evidence"])
+    for share in data.get("shares") or []:
+        print("  share: %s" % share)
+    for user in data.get("users") or []:
+        print("  user: %s" % user)
+    for f in res.get("findings") or []:
+        print("  [%s] %s" % (f["severity"].upper(), f["name"]))
+
+
+def bloodhound_cmd(arg, lang, scope):
+    """bloodhound export <url> | bloodhound import <file>"""
+    parts = arg.split(None, 1)
+    if len(parts) != 2 or parts[0] not in ("export", "import"):
+        print("bloodhound export <url> | bloodhound import <file>")
+        print("BloodHound CE needs a Neo4j server + a SharpHound")
+        print("collection from a domain host — it cannot run here.")
+        return
+    if parts[0] == "import":
+        try:
+            res = bloodhound_mod.import_collection(parts[1])
+        except (OSError, ValueError) as exc:
+            print("bloodhound import error: %s" % exc)
+            return
+        print("BloodHound import: %s" % res.get("status"))
+        summ = (res.get("data") or {}).get("summary") or {}
+        print("  total objects: %s" % summ.get("total_objects"))
+        for k, v in (summ.get("counts") or {}).items():
+            print("  %s: %s" % (k, v))
+        return
+    url = normalize_url(parts[1])
+    if not valid_url(url):
+        print(t(lang, "invalid_url"))
+        return
+    if not scope.is_authorized(url):
+        print(t(lang, "scope_required"))
+        return
+    host = url.split("/")[2]
+    domain = host.split(":")[0]
+    ips = resolve_ips(domain if "." in domain else host)
+    ip = ips[0] if ips else ""
+    plan_path, cmd_path = bloodhound_mod.export_plan(url, ip)
+    print("Saved: %s" % plan_path)
+    print("Saved: %s" % cmd_path)
+    print("Collect with SharpHound on the owner's domain host, then:")
+    print("  bloodhound import <collected-file.json>")
 
 
 def zap_cmd(arg, lang, scope):
@@ -613,7 +735,7 @@ def run_single_engine(name, url, lang, scope):
             r.get("headers").get_all("Set-Cookie") or [])
     except Exception:
         pass
-    if name in ("cookies", "paths", "ipintel", "timeline"):
+    if name in ("cookies", "paths", "ipintel", "timeline", "wireshark"):
         crawl_res = BY_NAME["crawl"].run(ctx)
         ctx["pages"] = (crawl_res.get("data") or {}).get("pages") or []
         ctx["scripts"] = (crawl_res.get("data") or {}).get("scripts") or []
@@ -625,6 +747,13 @@ def run_single_engine(name, url, lang, scope):
         ctx["whois"] = BY_NAME["whois"].run(ctx).get("data") or {}
     if name == "ipintel":
         ctx["ports_data"] = BY_NAME["ports"].run(ctx).get("data") or {}
+    if name in ("netexec", "bloodhound"):
+        ctx["ports_data"] = BY_NAME["ports"].run(ctx).get("data") or {}
+        ctx["open_ports_all"] = sorted(
+            {item.get("port")
+             for item in (ctx["ports_data"].get("open_ports") or [])})
+        from webdon.adapters import netexec as netexec_mod
+        ctx["ad_indicators"] = netexec_mod.detect_ad_indicators(ctx)
     out = engine_mod.call_with_timeout(
         lambda: BY_NAME[name].run(ctx), 90)
     if isinstance(out, dict) and out.get("timed_out"):
@@ -764,10 +893,13 @@ def print_help(lang):
     print("WEBDON — %s" % t(lang, "help_title"))
     print("  scope create <url> — %s" % t(lang, "help_scope"))
     print("  scope list         — %s" % t(lang, "scope_list"))
-    print("  hive <url> / auto  — HIVE: every tool, one command (5 waves)")
+    print("  hive <url> / auto  — HIVE: every tool, one command (6 waves)")
     print("  tools list | tools check <n> | tools install <n>")
     print("  zap export <url>   — ZAP context + PC plan")
     print("  zap run <url>      — run ZAP only if installed (PC)")
+    print("  openvas export <url> | openvas run <url> — GVM server")
+    print("  netexec run <ip>   — AD check, anonymous only, opt-in")
+    print("  bloodhound export <url> | bloodhound import <file>")
     print("  neo export [id] | neo push [id] — cloud hook (env key only)")
     print("  proxy              — Burp-like request log")
     print("  repeater <id> [H: v] — resend a logged request")
@@ -892,6 +1024,12 @@ def console():
             tools_cmd(arg, lang)
         elif cmd == "zap":
             zap_cmd(arg, lang, scope)
+        elif cmd == "openvas":
+            openvas_cmd(arg, lang, scope)
+        elif cmd == "netexec":
+            netexec_cmd(arg, lang, scope)
+        elif cmd == "bloodhound":
+            bloodhound_cmd(arg, lang, scope)
         elif cmd == "neo":
             neo_cmd(arg, lang)
         elif cmd == "proxy":

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Naabu adapter — port scan (v2.00).
+"""Naabu adapter — port scan (v3.00).
 
 SYN scanning needs privileges. On Termux (no root) Naabu cannot
 do a SYN scan, so the adapter ALWAYS falls back to the built-in

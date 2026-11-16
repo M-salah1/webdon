@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Katana adapter — crawl with JS discovery (v2.00).
+"""Katana adapter — crawl with JS discovery (v3.00).
 
 Runs the real Katana binary when installed
 (`katana -u <url> -depth 3 -js-crawl`). Fallback: the built-in

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""HIVE — one command runs everything, like a beehive (v2.00).
+"""HIVE — one command runs everything, like a beehive (v3.00).
 
 `hive <url>` / `auto <url>` / `python3 webdon.py --hive <url>`:
-the operator gives only the URL; WEBDON runs five waves in
+the operator gives only the URL; WEBDON runs six waves in
 parallel inside the normal engine machinery:
 
   Wave 1 — recon:     crawl, headers, tls, tech, httpx, subfinder
@@ -11,8 +11,9 @@ parallel inside the normal engine machinery:
                       katana, nuclei
   Wave 3 — vuln/scan: ports, naabu, schemathesis (schema only)
   Wave 4 — IP alone:  ipintel, timeline
-  Wave 5 — API/schema: schemathesis runs inside wave 3; wave 5 is
-                      the report stage (unified score + JSON/HTML).
+  Wave 5 — NET:       nmap, wireshark, openvas, then netexec +
+                      bloodhound (AD applicability from merged ports)
+  Wave 6 — report:    unified score + JSON/HTML.
 
 Every wave runs under the same budgets, timeouts and scope gate
 as a normal scan; partial results are saved and resumable.
@@ -29,7 +30,9 @@ HIVE_WAVES = [
                    "paths", "katana", "nuclei"]),
     ("wave3-vuln", ["ports", "naabu", "schemathesis"]),
     ("wave4-ip", ["ipintel", "timeline"]),
-    ("wave5-report", []),
+    ("wave5-net", ["nmap", "wireshark", "openvas", "netexec",
+                   "bloodhound"]),
+    ("wave6-report", []),
 ]
 
 HIVE_PROFILE = "hive"
@@ -47,7 +50,8 @@ def adapter_status(scan):
     """Per-adapter status table from a hive scan's results."""
     out = {}
     for name in ("nuclei", "httpx", "subfinder", "katana", "naabu",
-                 "schemathesis"):
+                 "schemathesis", "nmap", "wireshark", "openvas",
+                 "netexec", "bloodhound"):
         res = (scan.get("results") or {}).get(name) or {}
         data = res.get("data") or {}
         out[name] = {

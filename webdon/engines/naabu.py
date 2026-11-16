@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""naabu — port scan engine wrapper (v2.00 HIVE).
+"""naabu — port scan engine wrapper (v3.00 HIVE).
 
 Thin wrapper around webdon.adapters.naabu: when the external
 binary is installed it runs it; otherwise the adapter falls back

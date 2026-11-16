@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Shared adapter layer — wraps real professional tools (v2.00 HIVE).
+"""Shared adapter layer — wraps real professional tools (v3.00 HIVE).
 
 Every adapter follows the same contract:
   * scope-gated: refuse without a signed scope (PermissionError).

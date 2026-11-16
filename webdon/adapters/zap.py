@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ZAP bridge — export a ZAP context + scan plan for a PC (v2.00).
+"""ZAP bridge — export a ZAP context + scan plan for a PC (v3.00).
 
 Full OWASP ZAP is a Java application: it is best on a computer,
 not practical on ARM64 Termux. WEBDON never pretends ZAP ran:
@@ -40,7 +40,7 @@ def detect():
 
 def export_plan(url, out_dir=".", scope_host=""):
     """Write context + plan files. Returns (context_path, plan_path)."""
-    ctx = {"tool": "WEBDON v2.00 HIVE - ZAP bridge",
+    ctx = {"tool": "WEBDON v3.00 HIVE - ZAP bridge",
            "target": url, "scope_host": scope_host,
            "include": [url + "/*"],
            "exclude": [],

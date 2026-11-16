@@ -1,4 +1,4 @@
-# WEBDON v2.00 HIVE — no core dependencies.
+# WEBDON v3.00 NET — no core dependencies.
 # Python standard library only: no pip install needed in Termux.
 # (This file intentionally lists no core packages.)
 #
@@ -10,8 +10,12 @@
 #     go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 #     go install github.com/projectdiscovery/katana/cmd/katana@latest
 #     go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
-#   schemathesis — via pip:
+#   schemathesis, netexec — via pip:
 #     pip install schemathesis
+#     pip install netexec
+#   nmap, tshark (Wireshark) — via Termux packages:
+#     pkg install nmap tshark
 #   zap — bridge only (full ZAP runs on a PC, Java required).
+#   openvas, bloodhound — server/PC bridges (no Termux install).
 #   neo — cloud hook (needs NEO_API_KEY + NEO_API_URL in the env).
 #   burp-like — built-in, nothing to install.

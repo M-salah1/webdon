@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Burp-like module — built-in, no Burp Suite binary (v2.00).
+"""Burp-like module — built-in, no Burp Suite binary (v3.00).
 
 Burp Suite Professional is commercial and cannot be bundled.
 WEBDON ships a built-in equivalent for the authorized target only:

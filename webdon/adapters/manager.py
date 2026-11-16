@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tool manager — detect / install the professional tools (v2.00).
+"""Tool manager — detect / install the professional tools (v3.00).
 
 `tools list`  — status table for all 9 tools (installed version,
 not_installed, fallback, bridge).
@@ -85,6 +85,46 @@ TOOLS = {
         "install_pkg": None,
         "note": "Built-in Burp-like: proxy / repeater / sitemap / scanner",
     },
+    # --- v3.00 NET — network & systems tools ---
+    "nmap": {
+        "kind": "binary (pkg)", "binary": "nmap",
+        "version_args": ("--version",),
+        "install_go": None,
+        "install_pkg": "pkg install nmap",
+        "note": "Service & port discovery (no OS detection without root)",
+    },
+    "tshark": {
+        "kind": "binary (pkg)", "binary": "tshark",
+        "version_args": ("--version",),
+        "install_go": None,
+        "install_pkg": "pkg install tshark",
+        "note": "Wireshark traffic analysis — capture needs root on "
+                "Termux; fallback uses WEBDON's own request log",
+    },
+    "openvas": {
+        "kind": "bridge (server)", "binary": None,
+        "version_args": (),
+        "install_go": None,
+        "install_pkg": None,
+        "note": "Greenbone OpenVAS/GVM: server bridge — cannot run "
+                "inside Termux; export a task for a PC/server",
+    },
+    "netexec": {
+        "kind": "python (pip)", "binary": "nxc",
+        "version_args": ("--version",),
+        "install_go": None,
+        "install_pkg": "pip install netexec",
+        "note": "Windows/AD assessment — anonymous only, no spraying "
+                "or brute force, opt-in only",
+    },
+    "bloodhound": {
+        "kind": "bridge (server)", "binary": None,
+        "version_args": (),
+        "install_go": None,
+        "install_pkg": None,
+        "note": "BloodHound CE: server bridge — needs a Neo4j server "
+                "+ SharpHound collection from a domain host",
+    },
 }
 
 
@@ -101,7 +141,7 @@ def check(name):
     info = TOOLS.get(name)
     if not info:
         return {"name": name, "status": "unknown_tool"}
-    if info["kind"] in ("built-in", "cloud hook"):
+    if info["kind"] in ("built-in", "cloud hook", "bridge (server)"):
         return {"name": name, "status": info["kind"],
                 "version": None, "note": info["note"]}
     binary = info["binary"]
@@ -139,7 +179,8 @@ def install(name, timeout=600, runner=run_cmd):
     if not info:
         return {"name": name, "installed": False,
                 "error": "unknown tool: %s" % name}
-    if info["kind"] in ("built-in", "cloud hook", "bridge (PC)"):
+    if info["kind"] in ("built-in", "cloud hook", "bridge (PC)",
+                       "bridge (server)"):
         return {"name": name, "installed": False,
                 "error": "%s is %s — nothing to install here"
                          % (name, info["kind"]),

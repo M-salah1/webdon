@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""schemathesis — API checks engine wrapper (v2.00 HIVE).
+"""schemathesis — API checks engine wrapper (v3.00 HIVE).
 
 Thin wrapper around webdon.adapters.schemathesis: when the external
 binary is installed it runs it; otherwise the adapter falls back

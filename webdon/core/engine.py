@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""WEBDON orchestrator — runs the engines as one investigation (v2.00 HIVE).
+"""WEBDON orchestrator — runs the engines as one investigation (v3.00 HIVE).
 
 Waves (independent engines run in parallel inside each wave):
   1. crawl + headers + tls + tech    (needs only the homepage)
@@ -47,6 +47,9 @@ ENGINE_DEADLINES = {
     "timeline": 30,
     "httpx": 60, "subfinder": 120, "katana": 120, "nuclei": 180,
     "naabu": 120, "schemathesis": 300,
+    # v3.00 NET — Wave 6: network & systems tools.
+    "nmap": 120, "wireshark": 90, "openvas": 60, "netexec": 120,
+    "bloodhound": 60,
 }
 
 PROFILE_BUDGETS = {"quick": 120, "deep": 300, "forensic": 600,
@@ -343,7 +346,10 @@ def _execute(url, profile, scope, settings, progress, existing=None):
     # + subfinder. Wave 2 — web: dns + whois + cookies + cors +
     # protect + paths + katana + nuclei. Wave 3 — vuln: ports +
     # naabu + schemathesis. Wave 4 — IP alone: ipintel + timeline.
-    # Non-hive profiles only run the engines they list.
+    # Wave 6 (v3.00 NET) — network & systems: nmap + wireshark +
+    # openvas, then netexec + bloodhound (AD applicability from
+    # the merged open ports). Non-hive profiles only run the
+    # engines they list.
     _run_wave(["crawl", "headers", "tls", "tech", "httpx", "subfinder"])
     crawl_data = (results.get("crawl") or {}).get("data") or {}
     ctx["pages"] = crawl_data.get("pages") or []
@@ -364,6 +370,25 @@ def _execute(url, profile, scope, settings, progress, existing=None):
     _run_wave(["ports", "naabu", "schemathesis"])
     ctx["ports_data"] = (results.get("ports") or {}).get("data") or {}
     _run_wave(["ipintel", "timeline"])
+    # HIVE Wave 6 (v3.00 NET) — network & systems tools, in two
+    # sub-steps: first nmap + wireshark + openvas (they need only
+    # the IP and earlier results), then netexec + bloodhound, which
+    # decide applicability from the merged open ports (AD ports).
+    # Non-hive profiles do not list these engines, so both waves
+    # are no-ops there.
+    _run_wave(["nmap", "wireshark", "openvas"])
+    ctx["nmap_data"] = (results.get("nmap") or {}).get("data") or {}
+    merged_ports = set()
+    for src in (ctx.get("ports_data") or {}, ctx["nmap_data"]):
+        for item in (src.get("open_ports") or []):
+            try:
+                merged_ports.add(int(item.get("port")))
+            except (TypeError, ValueError):
+                pass
+    ctx["open_ports_all"] = sorted(merged_ports)
+    from ..adapters import netexec as netexec_mod
+    ctx["ad_indicators"] = netexec_mod.detect_ad_indicators(ctx)
+    _run_wave(["netexec", "bloodhound"])
     return _finalize(url, profile, engines, results, status, ctx, t0,
                      authorized)
 

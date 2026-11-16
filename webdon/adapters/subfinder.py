@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Subfinder adapter — subdomain enumeration (v2.00).
+"""Subfinder adapter — subdomain enumeration (v3.00).
 
 Runs the real Subfinder binary when installed
 (`subfinder -d <domain> -silent`). Fallback: crt.sh Certificate

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""katana — crawl + JS engine wrapper (v2.00 HIVE).
+"""katana — crawl + JS engine wrapper (v3.00 HIVE).
 
 Thin wrapper around webdon.adapters.katana: when the external
 binary is installed it runs it; otherwise the adapter falls back

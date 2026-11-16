@@ -4,10 +4,12 @@
 from . import cookies, cors, crawl, dns, headers, ipintel, paths
 from . import ports, protect, tech, timeline, tls, whois
 from . import httpx, katana, naabu, nuclei, schemathesis, subfinder
+from . import bloodhound, netexec, nmap, openvas, wireshark
 
 ENGINES = [crawl, headers, tls, tech, dns, whois, cookies, cors,
            protect, paths, ports, ipintel, timeline,
-           httpx, subfinder, katana, nuclei, naabu, schemathesis]
+           httpx, subfinder, katana, nuclei, naabu, schemathesis,
+           nmap, wireshark, openvas, netexec, bloodhound]
 
 BY_NAME = {e.NAME: e for e in ENGINES}
 
@@ -26,10 +28,12 @@ PROFILES = {
     "forensic": ["crawl", "headers", "tls", "tech", "dns", "whois",
                  "cookies", "cors", "protect", "paths", "ports",
                  "ipintel", "timeline"],
-    # hive: everything + the 6 external adapters — 19 engines,
-    # 45 phases, five waves (see webdon/core/hive.py).
+    # hive: everything + the 11 external adapters — 24 engines,
+    # 56 phases, six waves (see webdon/core/hive.py).
     "hive": ["crawl", "headers", "tls", "tech", "httpx", "subfinder",
              "dns", "whois", "cookies", "cors", "protect", "paths",
              "katana", "nuclei", "ports", "naabu", "schemathesis",
-             "ipintel", "timeline"],
+             "ipintel", "timeline",
+             # v3.00 NET — Wave 6: network & systems tools.
+             "nmap", "wireshark", "openvas", "netexec", "bloodhound"],
 }

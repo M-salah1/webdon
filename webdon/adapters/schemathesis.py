@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Schemathesis adapter — API schema checks (v2.00).
+"""Schemathesis adapter — API schema checks (v3.00).
 
 Runs ONLY when the owner supplies an OpenAPI schema file and the
 scope is signed:

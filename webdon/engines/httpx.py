@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""httpx — live probe engine wrapper (v2.00 HIVE).
+"""httpx — live probe engine wrapper (v3.00 HIVE).
 
 Thin wrapper around webdon.adapters.httpx: when the external
 binary is installed it runs it; otherwise the adapter falls back

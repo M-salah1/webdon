@@ -18,6 +18,32 @@ TOOL_LABEL = "WEBDON v%s HIVE" % __version__
 
 SEV_ORDER = ["critical", "high", "medium", "low", "info"]
 
+# v3.00 NET — the network & systems tools of Wave 6.
+NET_ENGINES = ("nmap", "wireshark", "openvas", "netexec", "bloodhound")
+
+
+def net_section(scan):
+    """Per-tool status of the Network & Systems wave.
+
+    Returns a list of (name, status, mode) — every status honest:
+    ran / fallback / bridge / not_applicable / skipped, never
+    invented. Empty when the scan has no NET engines (old scans).
+    """
+    rows = []
+    results = scan.get("results") or {}
+    status = scan.get("engine_status") or {}
+    for name in NET_ENGINES:
+        if name not in (scan.get("engines") or []):
+            continue
+        res = results.get(name) or {}
+        data = res.get("data") or {}
+        mode = (data.get("mode") or data.get("note") or "")
+        rows.append((name,
+                     (status.get(name) or {}).get("status")
+                     or res.get("status", "not_run"),
+                     mode[:120]))
+    return rows
+
 
 def score_line(scan, lang):
     if scan.get("score") is None:
@@ -82,6 +108,12 @@ def print_report(scan, lang="ar"):
         if run.get("error"):
             line += " — %s" % str(run["error"])[:70]
         print(line + ")")
+    net_rows = net_section(scan)
+    if net_rows:
+        print("-" * 60)
+        print("Network & Systems (Wave 6):")
+        for name, st, mode in net_rows:
+            print("  • %s: %s — %s" % (name, st, mode))
     by_engine = {}
     for ev in scan.get("evidence") or []:
         if (ev.get("validation") or {}).get("status") == "false_positive":
@@ -185,6 +217,11 @@ def to_html(scan, path):
                                               esc(run.get("duration_s", "")))
     limits = "".join("<li><b>%s:</b> %s</li>" % (esc(k), esc(v))
                      for k, v in (scan.get("limits") or {}).items())
+    net_rows = "".join(
+        "<li>%s: %s — %s</li>" % (esc(n), esc(s), esc(m))
+        for n, s, m in net_section(scan))
+    net_html = ("<h2>Network &amp; Systems</h2><ul>%s</ul>" % net_rows
+                if net_rows else "")
     score = scan.get("score")
     score_txt = "INCOMPLETE" if score is None else "%s%% (%s)" % (
         score, scan.get("grade"))
@@ -198,6 +235,7 @@ td,th{border:1px solid #334155;padding:6px;text-align:left}</style></head>
 &nbsp; <b>Confidence:</b> %s%% &nbsp; <b>Coverage:</b> %s%%
 &nbsp; <b>Verification rate:</b> %s%% &nbsp; <b>Duration:</b> %s s</p>
 <h2>Engines</h2><ul>%s</ul>
+%s
 <h2>Findings</h2><table><tr><th>Severity</th><th>Confirmation</th>
 <th>Finding</th>
 <th>Evidence</th><th>Fix</th></tr>%s</table>
@@ -211,7 +249,7 @@ td,th{border:1px solid #334155;padding:6px;text-align:left}</style></head>
         esc(scan.get("confidence", 0)),
         esc((scan.get("coverage") or {}).get("percent", 0)),
         esc((scan.get("metrics") or {}).get("verification_rate", 0)),
-        esc(scan.get("duration_s")), engines, rows, limits,
+        esc(scan.get("duration_s")), engines, net_html, rows, limits,
         "".join("<li>%s</li>" % esc(x)
                 for x in scan.get("recommendations") or []),
         __version__)

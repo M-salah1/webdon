@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""httpx adapter — live probe: status, title, tech, TLS (v2.00).
+"""httpx adapter — live probe: status, title, tech, TLS (v3.00).
 
 Runs the real httpx binary when installed
 (`httpx -u <url> -status-code -title -tech-detect -tls-probe`).
