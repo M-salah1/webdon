@@ -11,6 +11,8 @@ with the console command `summary <id>`.
 """
 import time
 
+from .. import __version__
+
 SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 
@@ -62,7 +64,7 @@ def build_summary(scan):
     metrics = scan.get("metrics") or {}
     coverage = scan.get("coverage") or {}
     summary = {
-        "tool": scan.get("tool", "WEBDON v1.00"),
+        "tool": scan.get("tool", "WEBDON v%s HIVE" % __version__),
         "target": scan.get("target"),
         "profile": scan.get("profile"),
         "score": scan.get("score"),
@@ -95,7 +97,7 @@ def build_summary(scan):
 def format_summary(summary, lang="en"):
     """Plain-text rendering of a summary dict."""
     lines = ["=" * 60,
-             "WEBDON v1.00 — Executive Summary",
+             "WEBDON v%s HIVE — Executive Summary" % __version__,
              "Target: %s   Profile: %s" % (
                  summary.get("target"), summary.get("profile"))]
     score = summary.get("score")

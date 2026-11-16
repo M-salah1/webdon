@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""WEBDON v1.00 — entry point.
+"""WEBDON v2.00 HIVE — entry point.
 
 Terminal console (Arabic / French / English) + direct scan mode.
     python3 webdon.py                                  # console
     python3 webdon.py --scan https://example.com
-    python3 webdon.py --scan https://example.com --profile forensic --json out.json
+    python3 webdon.py --hive https://example.com       # HIVE: everything
+    python3 webdon.py --hive https://example.com --schema api.yaml
 
 A signed scope is required before any scan:
     webdon > scope create https://example.com
+    webdon > hive https://example.com
 """
 import getpass
 import json
@@ -20,7 +22,12 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from webdon import __version__  # noqa: E402
+from webdon.adapters import burp as burp_mod  # noqa: E402
+from webdon.adapters import manager as tools_mod  # noqa: E402
+from webdon.adapters import neo as neo_mod  # noqa: E402
+from webdon.adapters import zap as zap_mod  # noqa: E402
 from webdon.core import engine as engine_mod  # noqa: E402
+from webdon.core import hive as hive_mod  # noqa: E402
 from webdon.core import report as report_mod  # noqa: E402
 from webdon.core import storage as storage_mod  # noqa: E402
 from webdon.core import summary as summary_mod  # noqa: E402
@@ -45,12 +52,12 @@ WEBDON_BANNER = r"""
 
 WELCOME = {
     "ar": [
-        "WEBDON v1.00 — أداة فحص المواقع الثقيلة",
+        "WEBDON v2.00 HIVE — أداة فحص المواقع الثقيلة",
         "نظام التحقيق الدفاعي الشامل — FOX COMPANY",
         "المطور: حافظ مهدي صلاح الدين — الجزائر",
         "",
         "ماذا تفعل الأداة؟",
-        "• 13 محرك تحقيق: DNS/IP، WHOIS، SSL/TLS، رؤوس الحماية،",
+        "• 19 محركاً + خلية HIVE: ضع الرابط فقط وتعمل كل الأدوات",
         "  التقنيات، الزحف والمسارات، ملفات الإعداد المكشوفة،",
         "  الكوكيز، CORS، المنافذ، متابعة الـ IP وحده، الحمايات،",
         "  والخط الزمني — مع التحقق من كلمات السر المسرّبة (HIBP)",
@@ -60,7 +67,7 @@ WELCOME = {
         "",
         "كيف تعمل؟",
         "1) وقّع الإذن:  scope create https://example.com",
-        "2) افحص:       scan https://example.com",
+        "2) افحص الكل:    hive https://example.com  (أو auto)",
         "3) تحقق من كلمة سر:  verify",
         "الأوامر: profile (quick/deep/forensic) — history — report — lang — help — exit",
         "",
@@ -69,12 +76,12 @@ WELCOME = {
         "والأداة تُبلغ عنها UNKNOWN ولا تخترع أرقاماً أبداً.",
     ],
     "en": [
-        "WEBDON v1.00 — Heavy Website Investigation Tool",
+        "WEBDON v2.00 HIVE — Heavy Website Investigation Tool",
         "Comprehensive defensive audit system — FOX COMPANY",
         "Developer: Hafed Mehdi Salah Eddine — Algeria",
         "",
         "What does it do?",
-        "• 13 investigation engines: DNS/IP, WHOIS, SSL/TLS, security",
+        "• 19 engines + HIVE: give only the URL, every tool runs",
         "  headers, technologies, crawl & paths, exposed config files,",
         "  cookies, CORS, ports, IP follow-up alone, protections,",
         "  and timeline — plus leaked-password verification (HIBP)",
@@ -84,7 +91,7 @@ WELCOME = {
         "",
         "How to work?",
         "1) Sign authorization:  scope create https://example.com",
-        "2) Scan:                scan https://example.com",
+        "2) Scan everything:     hive https://example.com  (or auto)",
         "3) Verify a password:   verify",
         "Commands: profile (quick/deep/forensic) — history — report — lang — help — exit",
         "",
@@ -94,12 +101,12 @@ WELCOME = {
         "numbers.",
     ],
     "fr": [
-        "WEBDON v1.00 — Outil lourd d'investigation de sites web",
+        "WEBDON v2.00 HIVE — Outil lourd d'investigation de sites web",
         "Système complet d'audit défensif — FOX COMPANY",
         "Développeur : Hafed Mehdi Salah Eddine — Algérie",
         "",
         "Que fait l'outil ?",
-        "• 13 moteurs : DNS/IP, WHOIS, SSL/TLS, en-têtes de sécurité,",
+        "• 19 moteurs + HIVE : donnez seulement l'URL, tout tourne",
         "  technologies, crawl et chemins, fichiers de config exposés,",
         "  cookies, CORS, ports, suivi de l'IP seule, protections,",
         "  chronologie — plus vérification des mots de passe fuités (HIBP)",
@@ -110,7 +117,7 @@ WELCOME = {
         "",
         "Comment l'utiliser ?",
         "1) Signez l'autorisation :  scope create https://example.com",
-        "2) Scannez :                scan https://example.com",
+        "2) Tout scanner :         hive https://example.com  (ou auto)",
         "3) Vérifiez un mot de passe :  verify",
         "Commandes : profile (quick/deep/forensic) — history — report — lang — help — exit",
         "",
@@ -253,7 +260,252 @@ def do_scan(url, profile, lang, scope, settings):
         scan["scan_id"] = scan_id
     except Exception:
         pass
+    record_scan_traffic(scan)
     return scan
+
+
+BURP_LOG = burp_mod.ProxyLog()
+
+
+def record_scan_traffic(scan):
+    """Log WEBDON's own requests into the Burp-like proxy log
+    (method/URL/status/header NAMES only — values never stored)."""
+    try:
+        BURP_LOG.record("GET", scan.get("target") or "",
+                        (scan.get("results") or {}).get("crawl", {})
+                        .get("data", {}).get("status"))
+        pages = ((scan.get("results") or {}).get("crawl", {})
+                 .get("data", {}).get("pages") or [])
+        for p in pages[:50]:
+            url = p.get("url") if isinstance(p, dict) else str(p)
+            if url and url != scan.get("target"):
+                BURP_LOG.record("GET", url,
+                                p.get("status") if isinstance(p, dict)
+                                else None)
+    except Exception:
+        pass
+
+
+def do_hive(url, lang, scope, settings, schema_path=None):
+    """HIVE: one command runs all five waves. Scope-gated."""
+    url = normalize_url(url)
+    if not valid_url(url):
+        print(t(lang, "invalid_url"))
+        return None
+    if not scope.is_authorized(url):
+        print(t(lang, "scope_required"))
+        return None
+    if not accept_terms(lang):
+        return None
+    total = hive_mod.total_phases()
+    spin = Spinner(total, lang)
+    spin.start()
+    scan = None
+    try:
+        scan = hive_mod.run_hive(url, scope=scope, settings=settings,
+                                 progress=spin.progress,
+                                 schema_path=schema_path)
+    except PermissionError as exc:
+        print(str(exc))
+    finally:
+        spin.finish(scan["duration_s"] if scan else 0)
+    if scan is None:
+        return None
+    print("HIVE waves: %s" % " -> ".join(hive_mod.wave_names()))
+    for name, info in (scan.get("hive") or {}).get("adapters", {}).items():
+        print("  %-12s %-28s %s" % (name, info.get("status", ""),
+                                    info.get("mode", "")[:60]))
+    report_mod.print_report(scan, lang)
+    try:
+        scan_id = storage_mod.save_scan(DB_FILE, scan)
+        scan["scan_id"] = scan_id
+    except Exception:
+        pass
+    record_scan_traffic(scan)
+    return scan
+
+
+def tools_cmd(arg, lang):
+    """tools list | tools check <name> | tools install <name>"""
+    parts = arg.split()
+    if not parts or parts[0] == "list":
+        print("=" * 60)
+        print("WEBDON — tools  (arch: %s)" % tools_mod.arch())
+        for row in tools_mod.list_all():
+            ver = (" — %s" % row["version"]) if row.get("version") else ""
+            print("  %-12s %-22s%s" % (row["name"], row["status"], ver))
+            print("      %s" % row.get("note", ""))
+        print("=" * 60)
+        return
+    if parts[0] == "check" and len(parts) == 2:
+        row = tools_mod.check(parts[1])
+        print("%s: %s%s" % (row["name"], row["status"],
+                            (" — %s" % row["version"])
+                            if row.get("version") else ""))
+        print("  %s" % row.get("note", ""))
+        return
+    if parts[0] == "install" and len(parts) == 2:
+        print("Installing %s — this can take a few minutes "
+              "(Go builds)..." % parts[1])
+        res = tools_mod.install(parts[1])
+        if res.get("installed"):
+            print("OK: %s installed — %s" % (parts[1],
+                                             res.get("version", "")))
+        else:
+            print("FAILED: %s" % res.get("error", ""))
+            if res.get("manual_command"):
+                print("Run manually: %s" % res["manual_command"])
+        return
+    print("tools list | tools check <name> | tools install <name>")
+
+
+def zap_cmd(arg, lang, scope):
+    """zap export <url> | zap run <url>"""
+    parts = arg.split(None, 1)
+    if len(parts) != 2 or parts[0] not in ("export", "run"):
+        print("zap export <url> | zap run <url>")
+        print("Full ZAP runs on a PC; on Termux use zap export.")
+        return
+    url = normalize_url(parts[1])
+    if not valid_url(url):
+        print(t(lang, "invalid_url"))
+        return
+    if not scope.is_authorized(url):
+        print(t(lang, "scope_required"))
+        return
+    if parts[0] == "export":
+        ctx_path, plan_path = zap_mod.export_plan(
+            url, scope_host=url.split("/")[2])
+        print("Saved: %s" % ctx_path)
+        print("Saved: %s" % plan_path)
+        print("On a PC: import the context into OWASP ZAP and follow "
+              "the plan.")
+        return
+    res = zap_mod.run({"url": url, "authorized": True})
+    print("ZAP: %s" % res.get("status"))
+    for key, val in (res.get("data") or {}).items():
+        if key == "pc_steps":
+            for step in val:
+                print("  - %s" % step)
+        else:
+            print("  %s: %s" % (key, val))
+
+
+def neo_cmd(arg, lang):
+    """neo export [id] | neo push [id]"""
+    parts = arg.split()
+    if not parts or parts[0] not in ("export", "push"):
+        print("neo export [id] | neo push [id]")
+        print("Push needs NEO_API_KEY + NEO_API_URL in the environment.")
+        return
+    scan = None
+    if len(parts) >= 2:
+        try:
+            scan = storage_mod.get_scan(DB_FILE, int(parts[1]))
+        except ValueError:
+            scan = None
+    if not scan:
+        rows = storage_mod.list_scans(DB_FILE)
+        if not rows:
+            print("no scans yet — run hive first")
+            return
+        scan = storage_mod.get_scan(DB_FILE, rows[-1]["id"])
+    if parts[0] == "export":
+        path = neo_mod.export_findings(scan)
+        print("Saved: %s" % path)
+        return
+    res = neo_mod.push(scan)
+    print("Neo push: %s" % res.get("status"))
+    for key, val in (res.get("data") or {}).items():
+        print("  %s: %s" % (key, val))
+
+
+def proxy_cmd(arg, lang):
+    """proxy — show the Burp-like request log."""
+    entries = BURP_LOG.list()
+    print("=" * 60)
+    print("WEBDON proxy log — %d recorded request(s)" % len(entries))
+    if not entries:
+        print("Empty: run a scan first; WEBDON logs its own requests.")
+    for e in entries[-30:]:
+        print("  #%d [%s] %s -> %s" % (e["id"], e["method"], e["url"],
+                                       e["status"]))
+    print("=" * 60)
+
+
+def repeater_cmd(arg, lang, scope):
+    """repeater <id> [Header: value ...] — resend a logged request."""
+    parts = arg.split()
+    if not parts:
+        print("repeater <id> [Header: value ...]")
+        return
+    try:
+        entry_id = int(parts[0])
+    except ValueError:
+        print("repeater <id> [Header: value ...]")
+        return
+    headers = {}
+    for piece in parts[1:]:
+        if ":" in piece:
+            k, v = piece.split(":", 1)
+            headers[k.strip()] = v.strip()
+    res = burp_mod.repeater(BURP_LOG, entry_id, scope, headers)
+    if res.get("error"):
+        print("repeater error: %s" % res["error"])
+        return
+    print("repeater #%d -> HTTP %s (%sms)" % (
+        entry_id, res.get("status"), res.get("elapsed_ms")))
+    print((res.get("body_preview") or "")[:500])
+
+
+def sitemap_cmd(arg, lang):
+    """sitemap [id] — URL tree of the last (or given) scan."""
+    scan = None
+    if arg.strip():
+        try:
+            scan = storage_mod.get_scan(DB_FILE, int(arg.strip()))
+        except ValueError:
+            scan = None
+    if not scan:
+        rows = storage_mod.list_scans(DB_FILE)
+        if not rows:
+            print("no scans yet — run hive first")
+            return
+        scan = storage_mod.get_scan(DB_FILE, rows[-1]["id"])
+    pages = ((scan.get("results") or {}).get("crawl", {})
+             .get("data", {}).get("pages") or [])
+    tree = burp_mod.sitemap(pages)
+    print("=" * 60)
+    print("Sitemap — %s (%d pages)" % (scan.get("target"), len(pages)))
+    for parent, children in tree.items():
+        print("  %s" % parent)
+        for child in children[:20]:
+            print("    └ %s" % child)
+    print("=" * 60)
+
+
+def scanner_cmd(arg, lang):
+    """scanner [id] — built-in misconfiguration scan summary."""
+    scan = None
+    if arg.strip():
+        try:
+            scan = storage_mod.get_scan(DB_FILE, int(arg.strip()))
+        except ValueError:
+            scan = None
+    if not scan:
+        rows = storage_mod.list_scans(DB_FILE)
+        if not rows:
+            print("no scans yet — run hive first")
+            return
+        scan = storage_mod.get_scan(DB_FILE, rows[-1]["id"])
+    summ = burp_mod.scanner_summary(scan)
+    print("=" * 60)
+    print("Scanner — score %s (%s), %d findings"
+          % (summ["score"], summ["grade"], summ["total_findings"]))
+    for area, count in summ["findings_by_area"].items():
+        if count:
+            print("  %-10s %d" % (area, count))
+    print("=" * 60)
 
 
 def dashboard(scan, lang):
@@ -512,6 +764,15 @@ def print_help(lang):
     print("WEBDON — %s" % t(lang, "help_title"))
     print("  scope create <url> — %s" % t(lang, "help_scope"))
     print("  scope list         — %s" % t(lang, "scope_list"))
+    print("  hive <url> / auto  — HIVE: every tool, one command (5 waves)")
+    print("  tools list | tools check <n> | tools install <n>")
+    print("  zap export <url>   — ZAP context + PC plan")
+    print("  zap run <url>      — run ZAP only if installed (PC)")
+    print("  neo export [id] | neo push [id] — cloud hook (env key only)")
+    print("  proxy              — Burp-like request log")
+    print("  repeater <id> [H: v] — resend a logged request")
+    print("  sitemap [id]       — crawled URL tree")
+    print("  scanner [id]       — built-in misconfiguration summary")
     print("  scan <url>         — %s" % t(lang, "help_scan"))
     print("  scan quick|deep|forensic <url> — scan with a profile")
     print("  engine <n> <url>   — %s" % t(lang, "help_engine"))
@@ -618,6 +879,29 @@ def console():
             scan = do_scan(target, profile, lang, scope, settings)
             if scan:
                 dashboard(scan, lang)
+        elif cmd in ("hive", "auto"):
+            if not arg:
+                try:
+                    arg = input("%s " % t(lang, "enter_url")).strip()
+                except (EOFError, KeyboardInterrupt):
+                    continue
+            scan = do_hive(arg, lang, scope, settings)
+            if scan:
+                dashboard(scan, lang)
+        elif cmd == "tools":
+            tools_cmd(arg, lang)
+        elif cmd == "zap":
+            zap_cmd(arg, lang, scope)
+        elif cmd == "neo":
+            neo_cmd(arg, lang)
+        elif cmd == "proxy":
+            proxy_cmd(arg, lang)
+        elif cmd == "repeater":
+            repeater_cmd(arg, lang, scope)
+        elif cmd == "sitemap":
+            sitemap_cmd(arg, lang)
+        elif cmd == "scanner":
+            scanner_cmd(arg, lang)
         elif valid_url(normalize_url(raw)):
             scan = do_scan(raw, profile, lang, scope, settings)
             if scan:
@@ -637,12 +921,21 @@ def main(argv):
     json_out = None
     html_out = None
     scan_flag = False
+    hive_flag = False
+    schema_path = None
     i = 1
     while i < len(argv):
         a = argv[i]
         if a == "--scan" and i + 1 < len(argv):
             scan_flag = True
             url = argv[i + 1]
+            i += 2
+        elif a == "--hive" and i + 1 < len(argv):
+            hive_flag = True
+            url = argv[i + 1]
+            i += 2
+        elif a == "--schema" and i + 1 < len(argv):
+            schema_path = argv[i + 1]
             i += 2
         elif a == "--profile" and i + 1 < len(argv):
             profile = argv[i + 1]
@@ -675,8 +968,17 @@ def main(argv):
         print(t(lang, "scope_required"))
         return 3
     try:
-        scan = engine_mod.run_scan(url, profile=profile, scope=scope,
-                                   settings=settings)
+        if hive_flag:
+            scan = hive_mod.run_hive(url, scope=scope, settings=settings,
+                                     schema_path=schema_path)
+            print("HIVE waves: %s" % " -> ".join(hive_mod.wave_names()))
+            for name, info in (scan.get("hive") or {}).get(
+                    "adapters", {}).items():
+                print("  %-12s %-28s %s" % (name, info.get("status", ""),
+                                            info.get("mode", "")[:60]))
+        else:
+            scan = engine_mod.run_scan(url, profile=profile, scope=scope,
+                                       settings=settings)
     except PermissionError as exc:
         print(str(exc))
         return 3

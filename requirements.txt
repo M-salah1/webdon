@@ -1,3 +1,17 @@
-# WEBDON v1.00 — no dependencies.
+# WEBDON v2.00 HIVE — no core dependencies.
 # Python standard library only: no pip install needed in Termux.
-# (This file intentionally lists no packages.)
+# (This file intentionally lists no core packages.)
+#
+# Optional professional tools (installed separately, see README
+# "Professional tools" and the `tools install <name>` command):
+#   nuclei, httpx, subfinder, katana, naabu — via Go:
+#     go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+#     go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+#     go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+#     go install github.com/projectdiscovery/katana/cmd/katana@latest
+#     go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+#   schemathesis — via pip:
+#     pip install schemathesis
+#   zap — bridge only (full ZAP runs on a PC, Java required).
+#   neo — cloud hook (needs NEO_API_KEY + NEO_API_URL in the env).
+#   burp-like — built-in, nothing to install.

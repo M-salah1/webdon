@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Scoring — one place where a score comes from (WEBDON v1.00).
+"""Scoring — one place where a score comes from (WEBDON v2.00 HIVE).
 
 Four separate metrics, each measured, none of them a guess:
 
@@ -18,6 +18,13 @@ WEIGHTS_CONFIRMED = {"critical": 25, "high": 15, "medium": 8,
                      "low": 3, "info": 0}
 WEIGHTS_INDICATOR = {"critical": 12, "high": 7, "medium": 4,
                      "low": 1, "info": 0}
+
+# Engine outcomes that count as "done": the engine ran and gave a
+# definitive answer. Fallbacks (external tool missing, built-in
+# equivalent ran instead) and honest skips (no schema supplied)
+# are done work, not failures — only timeout/error are not done.
+DONE_STATUSES = {"completed", "not_installed (fallback)", "fallback",
+                 "skipped", "skipped_no_schema", "not_installed"}
 
 
 def grade_for(score):
@@ -80,7 +87,7 @@ def compute_coverage(engines, status, results, phases=None):
     components = {}
     if engines:
         done = sum(1 for n in engines
-                   if (status.get(n) or {}).get("status") == "completed")
+                   if (status.get(n) or {}).get("status") in DONE_STATUSES)
         components["engines"] = round(100 * done / len(engines))
     if phases:
         total_phases = phases.get("total", 0)

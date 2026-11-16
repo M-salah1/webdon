@@ -3,9 +3,11 @@
 """Engine registry: every engine in WEBDON, in run order."""
 from . import cookies, cors, crawl, dns, headers, ipintel, paths
 from . import ports, protect, tech, timeline, tls, whois
+from . import httpx, katana, naabu, nuclei, schemathesis, subfinder
 
 ENGINES = [crawl, headers, tls, tech, dns, whois, cookies, cors,
-           protect, paths, ports, ipintel, timeline]
+           protect, paths, ports, ipintel, timeline,
+           httpx, subfinder, katana, nuclei, naabu, schemathesis]
 
 BY_NAME = {e.NAME: e for e in ENGINES}
 
@@ -24,4 +26,10 @@ PROFILES = {
     "forensic": ["crawl", "headers", "tls", "tech", "dns", "whois",
                  "cookies", "cors", "protect", "paths", "ports",
                  "ipintel", "timeline"],
+    # hive: everything + the 6 external adapters — 19 engines,
+    # 45 phases, five waves (see webdon/core/hive.py).
+    "hive": ["crawl", "headers", "tls", "tech", "httpx", "subfinder",
+             "dns", "whois", "cookies", "cors", "protect", "paths",
+             "katana", "nuclei", "ports", "naabu", "schemathesis",
+             "ipintel", "timeline"],
 }

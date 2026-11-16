@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""WEBDON orchestrator — runs the engines as one investigation (v1.00).
+"""WEBDON orchestrator — runs the engines as one investigation (v2.00 HIVE).
 
 Waves (independent engines run in parallel inside each wave):
   1. crawl + headers + tls + tech    (needs only the homepage)
@@ -29,6 +29,7 @@ import concurrent.futures
 import threading
 import time
 
+from .. import __version__
 from ..core import assets as assets_mod
 from ..core import summary as summary_mod
 from ..core import correlation as correlation_mod
@@ -44,9 +45,12 @@ ENGINE_DEADLINES = {
     "dns": 40, "whois": 40, "cookies": 30, "cors": 20,
     "protect": 20, "paths": 90, "ports": 120, "ipintel": 40,
     "timeline": 30,
+    "httpx": 60, "subfinder": 120, "katana": 120, "nuclei": 180,
+    "naabu": 120, "schemathesis": 300,
 }
 
-PROFILE_BUDGETS = {"quick": 120, "deep": 300, "forensic": 600}
+PROFILE_BUDGETS = {"quick": 120, "deep": 300, "forensic": 600,
+                   "hive": 900}
 
 # What WEBDON honestly cannot know. These are reported as UNKNOWN
 # with a one-line explanation — never invented.
@@ -164,7 +168,8 @@ def _finalize(url, profile, engines, results, status, ctx, t0, authorized):
     assets = assets_mod.build_assets({"results": results}, ctx)
 
     phases_done = sum(len(PHASES.get(n, [n])) for n in engines
-                      if (status.get(n) or {}).get("status") == "completed")
+                      if (status.get(n) or {}).get("status")
+                      in scoring_mod.DONE_STATUSES)
     phases_total = total_phases(profile)
     coverage = scoring_mod.compute_coverage(
         engines, status, results,
@@ -187,9 +192,10 @@ def _finalize(url, profile, engines, results, status, ctx, t0, authorized):
         validation_counts)
     duration = round(time.time() - t0, 1)
     completed = [n for n in engines
-                 if (status.get(n) or {}).get("status") == "completed"]
+                 if (status.get(n) or {}).get("status")
+                 in scoring_mod.DONE_STATUSES]
     scan = {
-        "tool": "WEBDON v1.00", "target": url, "profile": profile,
+        "tool": "WEBDON v%s" % __version__, "target": url, "profile": profile,
         "kind": "webdon-scan",
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                     time.gmtime(time.time() - duration)),
@@ -250,6 +256,9 @@ def _execute(url, profile, scope, settings, progress, existing=None):
 
     ctx, authorized = _build_ctx(url, scope)
     ctx["profile"] = profile
+    # Wave 5 (API/schema) input: an owner-supplied OpenAPI schema.
+    if settings.get("schema_path"):
+        ctx["schema"] = settings["schema_path"]
     engines = PROFILES.get(profile, PROFILES["deep"])
     if existing:
         results, status = existing
@@ -330,11 +339,18 @@ def _execute(url, profile, scope, settings, progress, existing=None):
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
 
-    _run_wave(["crawl", "headers", "tls", "tech"])
+    # HIVE wave 1 — recon: crawl + headers + tls + tech + httpx
+    # + subfinder. Wave 2 — web: dns + whois + cookies + cors +
+    # protect + paths + katana + nuclei. Wave 3 — vuln: ports +
+    # naabu + schemathesis. Wave 4 — IP alone: ipintel + timeline.
+    # Non-hive profiles only run the engines they list.
+    _run_wave(["crawl", "headers", "tls", "tech", "httpx", "subfinder"])
     crawl_data = (results.get("crawl") or {}).get("data") or {}
     ctx["pages"] = crawl_data.get("pages") or []
     ctx["scripts"] = crawl_data.get("scripts") or []
     ctx["tls"] = (results.get("tls") or {}).get("data") or {}
+    ctx["subdomains"] = ((results.get("subfinder") or {}).get("data")
+                         or {}).get("subdomains") or []
     ctx["cookie_headers"] = list(dict.fromkeys(
         ctx.get("cookie_headers") or []
         + (crawl_data.get("cookie_headers") or [])))
@@ -342,9 +358,10 @@ def _execute(url, profile, scope, settings, progress, existing=None):
     # stored crawl result now that the names/flags are in ctx.
     (results.get("crawl") or {}).get("data", {}).pop("cookie_headers",
                                                     None)
-    _run_wave(["dns", "whois", "cookies", "cors", "protect", "paths"])
+    _run_wave(["dns", "whois", "cookies", "cors", "protect", "paths",
+               "katana", "nuclei"])
     ctx["whois"] = (results.get("whois") or {}).get("data") or {}
-    _run_wave(["ports"])
+    _run_wave(["ports", "naabu", "schemathesis"])
     ctx["ports_data"] = (results.get("ports") or {}).get("data") or {}
     _run_wave(["ipintel", "timeline"])
     return _finalize(url, profile, engines, results, status, ctx, t0,

@@ -11,7 +11,10 @@ redacted evidence.
 import html as html_mod
 import json
 
+from .. import __version__
 from .i18n import t
+
+TOOL_LABEL = "WEBDON v%s HIVE" % __version__
 
 SEV_ORDER = ["critical", "high", "medium", "low", "info"]
 
@@ -36,7 +39,7 @@ def score_line(scan, lang):
 
 def print_report(scan, lang="ar"):
     print("=" * 60)
-    print("WEBDON v1.00 — %s" % t(lang, "report"))
+    print("%s — %s" % (TOOL_LABEL, t(lang, "report")))
     print("%s: %s" % (t(lang, "target"), scan.get("target")))
     print("%s: %s" % (t(lang, "profile"), scan.get("profile")))
     print(score_line(scan, lang))
@@ -137,7 +140,7 @@ def print_report(scan, lang="ar"):
     summary = scan.get("summary")
     if summary:
         print("=" * 60)
-        print("WEBDON v1.00 — Executive Summary")
+        print("%s — Executive Summary" % TOOL_LABEL)
         print("Score: %s  Grade: %s  |  Owner: %s / %s" % (
             "INCOMPLETE" if summary.get("score") is None
             else "%s%%" % summary.get("score"), summary.get("grade"),
@@ -190,7 +193,7 @@ def to_html(scan, path):
 <style>body{font-family:sans-serif;margin:2em;background:#0b1220;color:#e5e7eb}
 h1,h2{color:#7dd3fc}table{border-collapse:collapse}
 td,th{border:1px solid #334155;padding:6px;text-align:left}</style></head>
-<body><h1>WEBDON v1.00 — %s</h1>
+<body><h1>WEBDON v%s HIVE — %s</h1>
 <p><b>Target:</b> %s &nbsp; <b>Profile:</b> %s &nbsp; <b>Score:</b> %s
 &nbsp; <b>Confidence:</b> %s%% &nbsp; <b>Coverage:</b> %s%%
 &nbsp; <b>Verification rate:</b> %s%% &nbsp; <b>Duration:</b> %s s</p>
@@ -200,16 +203,18 @@ td,th{border:1px solid #334155;padding:6px;text-align:left}</style></head>
 <th>Evidence</th><th>Fix</th></tr>%s</table>
 <h2>What cannot be known</h2><ul>%s</ul>
 <h2>Recommendations</h2><ul>%s</ul>
-<p>WEBDON v1.00 — FOX COMPANY — Developer: Hafed Mehdi Salah Eddine</p>
+<p>WEBDON v%s HIVE — FOX COMPANY — Developer: Hafed Mehdi Salah Eddine</p>
 </body></html>""" % (
-        esc(scan.get("target")), esc(scan.get("target")),
+        esc(scan.get("target")), __version__,
+        esc(scan.get("target")),
         esc(scan.get("target")), esc(scan.get("profile")), esc(score_txt),
         esc(scan.get("confidence", 0)),
         esc((scan.get("coverage") or {}).get("percent", 0)),
         esc((scan.get("metrics") or {}).get("verification_rate", 0)),
         esc(scan.get("duration_s")), engines, rows, limits,
         "".join("<li>%s</li>" % esc(x)
-                for x in scan.get("recommendations") or []))
+                for x in scan.get("recommendations") or []),
+        __version__)
     with open(path, "w", encoding="utf-8") as f:
         f.write(doc)
     return path

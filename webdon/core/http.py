@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 
 USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-              "(KHTML, like Gecko) WebDon/1.00 Chrome/120.0 Safari/537.36")
+              "(KHTML, like Gecko) WebDon/2.00 Chrome/120.0 Safari/537.36")
 DOH_URL = "https://dns.google/resolve"
 
 
