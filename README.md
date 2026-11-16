@@ -1,4 +1,4 @@
-# WEBDON v5.00 DEEP-DIVE — Heavy Website Investigation System
+# WEBDON v5.1 PROFESSIONAL ASSURANCE — Heavy Website Investigation System
 
 **Developer:** Hafed Mehdi Salah Eddine — Algeria
 **Organization:** FOX COMPANY
@@ -6,19 +6,21 @@
 **Interface:** Metasploit-style terminal console in Arabic / English / French
 
 WEBDON is a heavy, modular, defensive website audit tool: **24 engines**,
-**4 profiles** (QUICK / DEEP / FORENSIC / HIVE), **56 phases in HIVE**
-(33 in FORENSIC, 31 in DEEP), SQLite history, JSON/HTML/PDF reports, and an
+**4 profiles** (QUICK / DEEP / FORENSIC / HIVE), **58 phases in HIVE**
+(35 in FORENSIC, 33 in DEEP), SQLite history, JSON/HTML/PDF reports, and an
 interactive console. It takes its time and investigates thoroughly —
 breadth of engines and pages crawled, never artificial delays.
 
-**v5.00 DEEP-DIVE** adds recursive investigation: when a scan finds
-a result, WEBDON follows it up with deeper probes on that exact
-result — and when those probes find more, it goes deeper again
-(max depth 3 by default, probe + time budgets, full dedup). Every
-finding gains depth / parent / chain, and the reports show the
-investigation trees. See [v5.00 DEEP-DIVE](#v500-deep-dive--recursive-investigation)
-below. v4.00 EVIDENCE (evidence + CVSS/CWE + remediation +
-professional reports) is unchanged underneath.
+**v5.1 PROFESSIONAL ASSURANCE** adds independent technical evidence
+per finding, an evidence-sufficiency gate, TLS deep validation,
+two-tier port classification, cookie-context analysis, WAF
+likelihood, and per-engine coverage transparency. See
+[v5.1 PROFESSIONAL ASSURANCE](#v51-professional-assurance) below.
+v5.00 DEEP-DIVE (recursive investigation: when a scan finds a
+result, WEBDON follows it up with deeper probes — max depth 3 by
+default, probe + time budgets, full dedup; every finding gains
+depth / parent / chain) and v4.00 EVIDENCE (evidence + CVSS/CWE +
+remediation + professional reports) are unchanged underneath.
 
 ## HIVE — one command runs everything (خلية النحل)
 
@@ -128,7 +130,7 @@ bridges — WEBDON never pretends they ran inside Termux.
 
 ```bash
 pkg update && pkg install -y python git
-unzip webdon-v5.00.zip
+unzip webdon-v5.1.zip
 cd webdon
 python3 webdon.py
 ```
@@ -185,6 +187,9 @@ webdon > report compare 1 2                 # new / fixed / persisting (v4.00)
 webdon > report timeline https://example.com # history of one target (v4.00)
 webdon > compare 1 2                        # diff two scans
 webdon > report chains 1                    # every investigation tree (v5.00)
+webdon > evidence show 1 F-001              # one evidence bundle: request + response (v5.1)
+webdon > coverage 1                         # per-engine coverage table (v5.1)
+webdon > waf https://example.com            # WAF likelihood + signals (v5.1)
 webdon > findings chain 1 F-014             # one investigation tree (v5.00)
 webdon > findings list 1                    # findings with ids (v4.00)
 webdon > findings mark-fp 1 F-003 "Cloudflare header, no version"  # suppress a false positive
@@ -500,3 +505,143 @@ canonical engine title, so the same problem has the same
 `finding_key` at any depth — the shallowest occurrence is kept,
 the deeper one is linked to it, and a confirmed re-probe only
 promotes the shallow finding (indicator → confirmed).
+
+
+## v5.1 PROFESSIONAL ASSURANCE
+
+What changed vs v5.00: every v5.00 feature is intact (hive, deep-dive,
+validation, FP marking, compare/timeline/chains, SQLite history).
+v5.1 makes seven things real, complete and visible:
+
+### 1. Evidence engine — standalone evidence bundles
+
+Every finding now has a standalone bundle in a new SQLite table
+`evidence_bundles` (one per finding): the full HTTP request
+(method, URL, headers, body excerpt) AND the full HTTP response
+(status, headers, body excerpt, truncated at a safe size), both
+redacted by the sanitizer, plus `verified_at` and the engine/method
+that produced it. `evidence show <scan-id> <F-001>` prints a bundle;
+JSON/HTML reports link each finding to its bundle. Findings with no
+HTTP request/response (DNS-only, TLS handshake, TCP probe, HEAD-only
+config check) say so explicitly (`request_response: null` + reason)
+instead of pretending. Old scans get bundles rebuilt from their
+stored evidence where possible, else marked `legacy_evidence`.
+
+### 2. False-positive intelligence — evidence-sufficiency gate
+
+A finding reaches `confirmed` ONLY when its evidence meets the
+minimum for its type. Otherwise it stays `suspected` with the missing
+evidence named (`evidence_gap`). Every finding carries
+`evidence_score` (0–100) + `sufficiency` (pass/fail + gap). The gate
+runs AFTER validation and AFTER the deep-dive, and it can only demote
+a `confirmed` claim — never promote thin evidence. No finding may be
+`confirmed` with sufficiency fail (regression-tested).
+
+| Type | Minimum evidence to reach `confirmed` |
+| ---- | -------------------------------------- |
+| header | absent on ≥2 distinct URLs, OR on 1 URL + a re-probe |
+| cookie | cookie name + flag state observed, + a re-probe |
+| tls | completed handshake AND a parsed certificate (or the plain-HTTP response itself for "No TLS") |
+| port | a banner or protocol response matched to a service — never a bare TCP answer (`needs banner`) |
+| config | HEAD 200 on the exact path, + a re-probe |
+| dns / whois | the public record observed, + a re-probe |
+| cors / tech / protect / generic | the observation + a re-probe (or a second independent signal) |
+
+### 3. TLS deep validation
+
+Full trust-chain validation against the system CA store (stdlib
+`ssl.create_default_context()` — the real verifier, not a hand-rolled
+check): `chain_valid` true/false + which link failed. Expiry as
+`expires_in_days` (warn <30 days, critical <7). SAN/hostname match
+against the target (DNS/IP SANs + CN fallback). Protocol enumeration
+(TLS 1.0/1.1/1.2/1.3 offered or not). Cipher enumeration — each
+offered cipher listed, RC4 / 3DES / NULL / export flagged weak
+(CWE-327). Self-signed, expired and SAN-mismatched are separate
+findings with their own evidence. Sandbox note: the sandbox egress
+proxy intercepts TLS, so smoke results there show proxy artefacts —
+labelled `proxy_artefact`, never reported as real cert problems.
+
+### 4. Port verification — two-tier classification
+
+Every port result is exactly one of:
+
+- `tcp_open` — SYN/connect answered, NO banner/protocol identified.
+  Informational only: never a vulnerability, never counted in the
+  score. (In the sandbox the egress proxy answers every TCP connect,
+  so a smoke scan shows 19 `tcp_open` — that is the proxy, not 19
+  services.)
+- `service_confirmed` — a banner or protocol response matched to a
+  service/version. Only a `service_confirmed` port on a risky service
+  is a real finding.
+
+The Nmap adapter maps the same way (`open` + service name →
+`service_confirmed`; `open` with no service → `tcp_open`). Reports
+show two separate tables/sections and counts; the terminal summary
+prints e.g. `ports: 2 service_confirmed, 61 tcp_open (unidentified)`.
+
+### 5. Cookie context analysis
+
+Each cookie is classified before it is judged: `session`
+(sessionid/PHPSESSID/JSESSIONID/connect.sid + path /), `csrf`
+(csrf/xsrf/_csrf_token), `tracking` (_ga/_gid/_fbp…), `functional`
+(theme/lang/cart…), `unknown`.
+
+| Context | Missing Secure | Missing HttpOnly |
+| ------- | -------------- | ---------------- |
+| session | HIGH | MEDIUM |
+| csrf | LOW (on HTTPS) | informational only — a CSRF cookie is MEANT to be read by JavaScript, so missing HttpOnly is EXPECTED, never a finding |
+| tracking | LOW, only when set over plain HTTP | never flagged (analytics JS needs to read it) |
+| functional | LOW (on HTTPS) | never flagged |
+| unknown | MEDIUM | MEDIUM |
+
+Each cookie finding states its context and WHY the flag matters (or
+doesn't) for that context; remediation is per context. Note: the
+"value shape" check for session cookies is deliberately not done —
+cookie values are never collected, so a value's shape can never be
+inspected; name + path classify a session cookie here.
+
+### 6. WAF confidence
+
+The binary verdict is gone. `waf_likelihood` is a probability
+0–100% with the contributing signals listed:
+
+| Signal | Weight |
+| ------ | ------ |
+| Known WAF header (cf-ray, x-sucuri-id, x-iinfo, x-mod-security…) | +25 to +40 |
+| WAF-identifying Server header (cloudflare, Sucuri, Akamai…) | +25 |
+| WAF cookie name (__cfduid, cf_clearance, AWSALB, Akamai BM…) | +20 |
+| Block response to a benign probe (GET/OPTIONS, no payloads) | +25 |
+| Status-code pattern (403/406/419 with WAF headers) | +10 |
+
+No signal observed → `waf_likelihood: low (8%) — no WAF signals
+observed`, with the checks performed named. That is never reported
+as "no WAF" — absence of signals is not proof of absence.
+`waf <url>` prints the likelihood + each signal with its weight.
+Detection-only: benign probes only, no bypass attempts.
+
+### 7. Coverage transparency
+
+Every report (terminal, JSON, HTML) has a per-engine coverage table
+for all 24 engines/adapters: `ran` (with phases completed),
+`fallback` (what replaced it and why), `skipped` (why: tool not
+installed, not applicable, not in profile), `failed` (error,
+redacted). The four measures are always four separate numbers —
+score, confidence, coverage, verification_rate — never merged into
+one. `coverage <scan-id>` prints the table for a scan.
+
+## v5.1 — التطمين المهني (ملخص عربي)
+
+- **الأدلة:** حزمة أدلة مستقلة لكل نتيجة (الطلب + الرد الكامل،
+  منقّحة) في جدول `evidence_bundles`، وأمر `evidence show`.
+- **بوابة الكفاية:** لا تصل النتيجة إلى `confirmed` إلا بدليل كافٍ
+  لنوعها (جدول أعلاه)؛ وإلا تبقى `suspected` مع تسمية الدليل الناقص.
+- **TLS عميق:** تحقق من السلسلة بمخزن CA الحقيقي، الأيام المتبقية
+  للشهادة، مطابقة SAN، إصدارات TLS، وتعداد الشفرات مع تمييز الضعيفة.
+- **المنافذ:** `tcp_open` (معلومة فقط، ليست ثغرة) مقابل
+  `service_confirmed` (خدمة مؤكدة بالبانر).
+- **الكوكيز:** التصنيف حسب السياق قبل الحكم؛ كوكي CSRF بدون
+  HttpOnly أمر متوقَّع وليس ثغرة.
+- **WAF:** احتمالية 0–100٪ مع الإشارات وأوزانها؛ لا "لا يوجد WAF"
+  كيقين أبداً.
+- **التغطية:** جدول حالة كل محرك من الـ 24 في كل تقرير، والمقاييس
+  الأربعة أرقام منفصلة دائماً.

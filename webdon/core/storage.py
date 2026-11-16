@@ -68,6 +68,16 @@ CREATE TABLE IF NOT EXISTS finding_history (
     status TEXT,
     UNIQUE(target, finding_key)
 );
+CREATE TABLE IF NOT EXISTS evidence_bundles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id INTEGER NOT NULL,
+    finding_id TEXT NOT NULL,
+    finding_name TEXT,
+    bundle_json TEXT NOT NULL,
+    verified_at TEXT,
+    legacy INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (scan_id) REFERENCES scans (id)
+);
 """
 
 
@@ -207,8 +217,72 @@ def save_scan(db_path, scan, base_dir=None):
                  run.get("duration_s"), run.get("retries", 0),
                  (run.get("error") or "")[:500]))
         _record_history(conn, scan_id, scan)
+        _save_bundles(conn, scan_id, scan)
         conn.commit()
         return scan_id
+    finally:
+        conn.close()
+
+
+def _save_bundles(conn, scan_id, scan):
+    """Store the scan's evidence bundles (v5.1), one per finding."""
+    from . import assurance as assurance_mod
+    bundles = scan.get("evidence_bundles") or []
+    if not bundles:
+        # Old scan shape / in-memory scan without bundles: build
+        # legacy bundles from stored evidence where possible.
+        bundles = [assurance_mod.migrate_bundle(f, scan.get("target")
+                                                or "")
+                   for f in (scan.get("findings") or [])
+                   + (scan.get("false_positives") or [])]
+    for b in bundles:
+        conn.execute(
+            "INSERT INTO evidence_bundles (scan_id, finding_id,"
+            " finding_name, bundle_json, verified_at, legacy)"
+            " VALUES (?,?,?,?,?,?)",
+            (scan_id, b.get("finding_id"), b.get("finding_name"),
+             json.dumps(b, ensure_ascii=False),
+             b.get("verified_at"), 1 if b.get("legacy") else 0))
+
+
+def get_evidence_bundle(db_path, scan_id, finding_id):
+    """One stored evidence bundle (dict) or None."""
+    if not os.path.exists(db_path):
+        return None
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT bundle_json FROM evidence_bundles"
+            " WHERE scan_id=? AND finding_id=?",
+            (scan_id, (finding_id or "").upper())).fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row[0])
+        except Exception:
+            return None
+    finally:
+        conn.close()
+
+
+def list_evidence_bundles(db_path, scan_id):
+    """All stored evidence bundles of one scan (list of dicts)."""
+    if not os.path.exists(db_path):
+        return []
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT bundle_json FROM evidence_bundles"
+            " WHERE scan_id=? ORDER BY id ASC", (scan_id,)).fetchall()
+        out = []
+        for (raw,) in rows:
+            try:
+                out.append(json.loads(raw))
+            except Exception:
+                pass
+        return out
     finally:
         conn.close()
 
@@ -229,6 +303,9 @@ def update_scan(db_path, scan_id, scan):
              (scan.get("coverage") or {}).get("percent"), payload, scan_id))
         conn.execute("DELETE FROM engine_runs WHERE scan_id=?",
                      (scan_id,))
+        conn.execute("DELETE FROM evidence_bundles WHERE scan_id=?",
+                     (scan_id,))
+        _save_bundles(conn, scan_id, scan)
         for name, run in (scan.get("engine_status") or {}).items():
             conn.execute(
                 "INSERT INTO engine_runs (scan_id, engine, status,"
@@ -379,6 +456,24 @@ def get_scan(db_path, scan_id):
             "status": "not_run", "max_depth": 0, "deepest": 0,
             "probes_run": 0, "new_findings": 0,
             "new_findings_by_depth": {}, "stop_reason": None})
+        # v5.1 EVIDENCE BUNDLES: load stored bundles; old scans get
+        # legacy bundles rebuilt from their stored evidence.
+        try:
+            stored = list_evidence_bundles(db_path, scan_id)
+        except Exception:
+            stored = []
+        if stored:
+            scan["evidence_bundles"] = stored
+        else:
+            from . import assurance as assurance_mod
+            scan["evidence_bundles"] = [
+                assurance_mod.migrate_bundle(f, target)
+                for f in (scan.get("findings") or [])
+                + (scan.get("false_positives") or [])]
+        for f in (scan.get("findings") or []) + \
+                (scan.get("false_positives") or []):
+            f.setdefault("evidence_bundle_id",
+                         "EB-%s" % (f.get("finding_id") or "?"))
         return scan
     finally:
         conn.close()

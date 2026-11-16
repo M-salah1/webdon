@@ -42,7 +42,7 @@ def _ctx(url="http://127.0.0.1:9", authorized=True):
 
 class TestVersion(unittest.TestCase):
     def test_version_is_2_00(self):
-        self.assertEqual(__version__, "5.00")
+        self.assertEqual(__version__, "5.1")
 
 
 class TestHiveStructure(unittest.TestCase):
@@ -58,9 +58,9 @@ class TestHiveStructure(unittest.TestCase):
                 hive_mod.run_hive("https://example.com", scope=scope)
 
     def test_old_profiles_unchanged(self):
-        self.assertEqual(engine_mod.total_phases("quick"), 13)
-        self.assertEqual(engine_mod.total_phases("deep"), 31)
-        self.assertEqual(engine_mod.total_phases("forensic"), 33)
+        self.assertEqual(engine_mod.total_phases("quick"), 15)
+        self.assertEqual(engine_mod.total_phases("deep"), 33)
+        self.assertEqual(engine_mod.total_phases("forensic"), 35)
 
 
 class TestNucleiAdapter(unittest.TestCase):
@@ -293,13 +293,13 @@ class TestHiveLab(unittest.TestCase):
             scan = hive_mod.run_hive(
                 base, scope=scope,
                 settings={"scan_budget_s": 180})
-            self.assertEqual(scan["tool"], "WEBDON v5.00")
+            self.assertEqual(scan["tool"], "WEBDON v5.1")
             self.assertEqual(scan["kind"], "webdon-hive")
             self.assertEqual(scan["profile"], "hive")
             self.assertIsNotNone(scan["score"])
             self.assertGreaterEqual(
                 scan["coverage"]["phases_done"], 55)
-            self.assertEqual(scan["hive"]["phases"], 56)
+            self.assertEqual(scan["hive"]["phases"], 58)
             self.assertEqual(len(scan["hive"]["waves"]), 6)
             adapters = scan["hive"]["adapters"]
             self.assertEqual(adapters["nuclei"]["status"],

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""WEBDON v5.00 DEEP-DIVE — entry point.
+"""WEBDON v5.1 PROFESSIONAL ASSURANCE — entry point.
 
 Terminal console (Arabic / French / English) + direct scan mode.
     python3 webdon.py                                  # console
@@ -31,6 +31,7 @@ from webdon.adapters import neo as neo_mod  # noqa: E402
 from webdon.adapters import netexec as netexec_mod  # noqa: E402
 from webdon.adapters import openvas as openvas_mod  # noqa: E402
 from webdon.adapters import zap as zap_mod  # noqa: E402
+from webdon.core import assurance as assurance_mod  # noqa: E402
 from webdon.core import deepdive as deepdive_mod  # noqa: E402
 from webdon.core import engine as engine_mod  # noqa: E402
 from webdon.core import hive as hive_mod  # noqa: E402
@@ -58,7 +59,7 @@ WEBDON_BANNER = r"""
 
 WELCOME = {
     "ar": [
-        "WEBDON v5.00 DEEP-DIVE — أداة فحص المواقع الثقيلة",
+        "WEBDON v5.1 PROFESSIONAL ASSURANCE — أداة فحص المواقع الثقيلة",
         "نظام التحقيق الدفاعي الشامل — FOX COMPANY",
         "المطور: حافظ مهدي صلاح الدين — الجزائر",
         "",
@@ -82,7 +83,7 @@ WELCOME = {
         "والأداة تُبلغ عنها UNKNOWN ولا تخترع أرقاماً أبداً.",
     ],
     "en": [
-        "WEBDON v5.00 DEEP-DIVE — Heavy Website Investigation Tool",
+        "WEBDON v5.1 PROFESSIONAL ASSURANCE — Heavy Website Investigation Tool",
         "Comprehensive defensive audit system — FOX COMPANY",
         "Developer: Hafed Mehdi Salah Eddine — Algeria",
         "",
@@ -107,7 +108,7 @@ WELCOME = {
         "numbers.",
     ],
     "fr": [
-        "WEBDON v5.00 DEEP-DIVE — Outil lourd d'investigation de sites web",
+        "WEBDON v5.1 PROFESSIONAL ASSURANCE — Outil lourd d'investigation de sites web",
         "Système complet d'audit défensif — FOX COMPANY",
         "Développeur : Hafed Mehdi Salah Eddine — Algérie",
         "",
@@ -799,6 +800,137 @@ def run_single_engine(name, url, lang, scope):
         print("      %s" % f.get("evidence", "")[:180])
 
 
+def evidence_cmd(arg, lang):
+    """evidence show <scan-id> <F-001> — print one standalone
+    evidence bundle (request + response + verified_at), redacted.
+    v5.1: findings with no HTTP request/response print the reason
+    instead of pretending."""
+    parts = arg.split()
+    if len(parts) != 3 or parts[0] != "show":
+        print("evidence show <scan-id> <F-001>")
+        print("Prints the stored evidence bundle: full HTTP request "
+              "and response (redacted), verified_at, engine/method — "
+              "or the reason when no request/response exists.")
+        return
+    try:
+        scan_id = int(parts[1])
+    except ValueError:
+        print("evidence show <scan-id> <F-001>")
+        return
+    evidence_show_cmd(scan_id, parts[2])
+
+
+def evidence_show_cmd(scan_id, finding_id):
+    """Print one evidence bundle. Used by evidence_cmd."""
+    bundle = storage_mod.get_evidence_bundle(DB_FILE, scan_id,
+                                             finding_id)
+    if not bundle:
+        print("no evidence bundle for %s in scan #%s"
+              % (finding_id, scan_id))
+        return
+    print("=" * 60)
+    print("Evidence bundle %s — %s"
+          % (bundle.get("bundle_id"), bundle.get("finding_name")))
+    print("Finding: %s | Engine: %s | Method: %s" % (
+        bundle.get("finding_id"), bundle.get("engine"),
+        bundle.get("method")))
+    print("Verified at: %s%s" % (
+        bundle.get("verified_at"),
+        " (legacy bundle)" if bundle.get("legacy") else ""))
+    if bundle.get("request_response"):
+        req = bundle.get("request") or {}
+        resp = bundle.get("response") or {}
+        print("-" * 60)
+        print("REQUEST: %s %s" % (req.get("method"), req.get("url")))
+        for k, v in (req.get("headers") or {}).items():
+            print("  %s: %s" % (k, v))
+        if req.get("body_excerpt"):
+            print("  body excerpt: %s" % req["body_excerpt"][:500])
+        print("RESPONSE: HTTP %s" % resp.get("status"))
+        for k, v in (resp.get("headers") or {}).items():
+            print("  %s: %s" % (k, v))
+        if resp.get("body_excerpt"):
+            print("  body excerpt: %s" % resp["body_excerpt"][:500])
+    else:
+        print("request/response: null")
+        print("Reason: %s" % bundle.get("reason"))
+    print("=" * 60)
+
+
+def coverage_cmd(arg, lang):
+    """coverage <id> — print the per-engine coverage table of a
+    stored scan (v5.1): ran / fallback / skipped / failed + reason
+    for each of the 24 engines, and the four separate measures."""
+    try:
+        scan_id = int(arg.split()[0])
+    except (ValueError, IndexError):
+        print("coverage <id>   (see history for ids)")
+        return
+    scan = storage_mod.get_scan(DB_FILE, scan_id)
+    if not scan:
+        print("scan not found — type history")
+        return
+    print("=" * 60)
+    print("Coverage — #%d %s" % (scan_id, scan.get("target")))
+    print("Four measures (separate): score=%s  confidence=%s%%  "
+          "coverage=%s%%  verification_rate=%s%%" % (
+              "INCOMPLETE" if scan.get("score") is None
+              else "%s%%" % scan.get("score"),
+              scan.get("confidence", 0),
+              (scan.get("coverage") or {}).get("percent", 0),
+              (scan.get("metrics") or {}).get("verification_rate", 0)))
+    report_mod.print_coverage_table(scan)
+    print("=" * 60)
+
+
+def waf_cmd(arg, lang, scope):
+    """waf <url> — print the WAF likelihood (v5.1) for a URL:
+    probability 0-100% + each signal with its weight + the checks
+    performed. Scope-gated, benign probes only."""
+    if not arg:
+        print("waf <url>")
+        return
+    url = normalize_url(arg)
+    if not valid_url(url):
+        print(t(lang, "invalid_url"))
+        return
+    if not scope.is_authorized(url):
+        print(t(lang, "scope_required"))
+        return
+    from webdon.engines import protect as protect_mod
+    r = request_retry(url, timeout=10, attempts=2)
+    if r.get("status") is None:
+        print("homepage unreachable: %s" % (r.get("error") or ""))
+        return
+    headers = lower_headers(r.get("headers") or {})
+    cookie_names = []
+    try:
+        for raw in (r.get("headers").get_all("Set-Cookie") or []):
+            cookie_names.append(raw.split(";", 1)[0].split("=", 1)[0])
+    except Exception:
+        pass
+    blocked = protect_mod.benign_probe(url)
+    waf = protect_mod.analyze_waf(headers, cookie_names,
+                                  status=r.get("status"),
+                                  probe_blocked=blocked)
+    print("=" * 60)
+    print("WAF likelihood — %s" % url)
+    print("waf_likelihood: %d%% — %s" % (waf["waf_likelihood"],
+                                          waf["verdict"]))
+    print("Signals:")
+    for sig in waf["signals"]:
+        mark = "YES" if sig["observed"] else "no "
+        print("  [%s] +%d  %s%s" % (
+            mark, sig["weight"], sig["signal"],
+            (" — %s" % sig["detail"]) if sig["detail"] else ""))
+    print("Checks performed:")
+    for c in waf["checks_performed"]:
+        print("  • %s" % c)
+    if waf["protections"]:
+        print("Protections: %s" % ", ".join(waf["protections"]))
+    print("=" * 60)
+
+
 def compare_cmd(arg, lang):
     parts = arg.split()
     if len(parts) != 2:
@@ -1089,6 +1221,9 @@ def print_help(lang):
     print("  compare <a> <b>    — %s" % t(lang, "help_compare"))
     print("  resume <id>        — %s" % t(lang, "help_resume"))
     print("  summary <id>       — Executive summary of a stored scan")
+    print("  evidence show <id> <F-001> — one evidence bundle (v5.1)")
+    print("  coverage <id>      — per-engine coverage table (v5.1)")
+    print("  waf <url>          — WAF likelihood + signals (v5.1)")
     print("  profile <name>     — %s (quick / deep / forensic)" % t(lang, "help_profile"))
     print("  history            — %s" % t(lang, "help_history"))
     print("  lang               — %s" % t(lang, "help_lang"))
@@ -1172,6 +1307,12 @@ def console():
             resume_cmd(arg, lang, scope)
         elif cmd == "summary":
             summary_cmd(arg, lang)
+        elif cmd == "evidence":
+            evidence_cmd(arg, lang)
+        elif cmd == "coverage":
+            coverage_cmd(arg, lang)
+        elif cmd == "waf":
+            waf_cmd(arg, lang, scope)
         elif cmd == "scan":
             scan_parts = arg.split(None, 1)
             if scan_parts and scan_parts[0] in PROFILES:

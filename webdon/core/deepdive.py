@@ -1375,9 +1375,30 @@ def apply_to_scan(scan, scope, settings=None, depth=None,
         for f in findings:
             if evidence_mod.finding_key(f.get("name", "")) == \
                     dup.get("finding_key") \
-                    and f.get("confirmation") == "indicator":
+                    and f.get("confirmation") in ("indicator",
+                                                  "suspected"):
                 f["confirmation"] = "confirmed"
+                # The deep-dive re-probe IS the re-probe evidence
+                # for the sufficiency gate (header rule: 1 URL +
+                # re-probe).
+                f["reprobe_verified"] = True
                 break
+    # v5.1 PROFESSIONAL ASSURANCE — gate runs AFTER the deep-dive:
+    # a finding (old or new) is `confirmed` only when its evidence
+    # meets its type's minimum; otherwise `suspected` + named gap.
+    from ..core import assurance as assurance_mod
+    assurance_mod.apply_assurance(scan["findings"], ctx)
+    # Standalone evidence bundles for the new deep-dive findings
+    # (probe findings have no single HTTP request/response).
+    try:
+        bundles = scan.get("evidence_bundles") or []
+        for f in enriched:
+            b = assurance_mod.build_bundle(f, ctx)
+            f["evidence_bundle_id"] = b["bundle_id"]
+            bundles.append(b)
+        scan["evidence_bundles"] = bundles
+    except Exception:
+        pass
     # Score exactly like normal findings: confirmed full, suspected
     # half, FP-marked excluded; each finding_key counts once (the
     # runner already deduped across depths).

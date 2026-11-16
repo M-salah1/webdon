@@ -522,7 +522,7 @@ class TestReports(unittest.TestCase):
             report_mod.to_json_report(scan, path)
             with open(path, encoding="utf-8") as f:
                 rep = json.load(f)
-            self.assertEqual(rep["report_version"], "5.00")
+            self.assertEqual(rep["report_version"], "5.1")
             self.assertIn("findings", rep)
             self.assertIn("scores", rep)
             self.assertIn("coverage", rep)

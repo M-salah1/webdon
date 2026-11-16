@@ -418,7 +418,7 @@ class TestLabScan(unittest.TestCase):
             scan = engine_mod.run_scan(
                 base, profile="deep", scope=scope,
                 settings={"scan_budget_s": 120})
-            self.assertEqual(scan["tool"], "WEBDON v5.00")
+            self.assertEqual(scan["tool"], "WEBDON v5.1")
             self.assertEqual(scan["profile"], "deep")
             self.assertIsNotNone(scan["score"])
             self.assertGreaterEqual(

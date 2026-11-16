@@ -36,8 +36,10 @@ def build_args(ip):
 def parse_xml(text):
     """Parse Nmap -oX XML. Returns a list of open-port dicts.
 
-    A port is "service_identified" only when <service> carries a
-    name/product/version; otherwise it is "tcp_open".
+    v5.1 two-tier: a port is "service_confirmed" only when
+    <service> carries a name/product/version (a banner/version was
+    actually read); otherwise it is "tcp_open" — informational
+    only, never a service and never scored.
     """
     out = []
     if not (text or "").strip().startswith("<"):
@@ -68,7 +70,7 @@ def parse_xml(text):
             out.append({
                 "port": portid,
                 "service": service or _guess(portid),
-                "state": "service_identified" if identified else "tcp_open",
+                "state": "service_confirmed" if identified else "tcp_open",
                 "identified": identified,
                 "banner": service if identified else "",
             })
@@ -95,13 +97,27 @@ def _findings_for(open_ports):
     from ..engines import ports as ports_mod
     findings = []
     for item in open_ports:
-        if item["port"] in ports_mod.RISKY_PORTS and item.get("state") in (
-                "service_confirmed", "service_identified"):
+        # v5.1: only service_confirmed ports are findings. A tcp_open
+        # port is informational only and is never scored.
+        if item["port"] in ports_mod.RISKY_PORTS and item.get("state") \
+                in ("service_confirmed", "service_identified"):
+            # ("service_identified" is the pre-v5.1 name for the same
+            # thing — a banner was matched. Accepted for old data.)
             findings.append(finding(
                 "high", "Sensitive service on port %d" % item["port"],
-                "port %d %s" % (item["port"], item.get("service") or ""),
+                "port %d %s (service_confirmed)" % (
+                    item["port"], item.get("service") or ""),
                 "Close port %d or restrict it to trusted networks."
                 % item["port"], confirmation="confirmed"))
+        elif item["port"] in ports_mod.RISKY_PORTS:
+            findings.append(finding(
+                "info", "Port %d open but service unidentified "
+                        "(tcp_open)" % item["port"],
+                "port %d answered but no service was identified — "
+                "informational only" % item["port"],
+                "Confirm from inside the network whether a service "
+                "really listens on port %d." % item["port"],
+                confirmation="info"))
     return findings
 
 
@@ -124,6 +140,18 @@ def run(ctx, timeout=180, runner=run_cmd):
              "open_count": len(open_ports),
              "identified_count": sum(
                  1 for p in open_ports if p.get("identified")),
+             "service_confirmed_count": sum(
+                 1 for p in open_ports
+                 if p.get("state") == "service_confirmed"),
+             "tcp_open_count": sum(
+                 1 for p in open_ports
+                 if p.get("state") == "tcp_open"),
+             "service_confirmed_ports": [
+                 p for p in open_ports
+                 if p.get("state") == "service_confirmed"],
+             "tcp_open_ports": [
+                 p for p in open_ports
+                 if p.get("state") == "tcp_open"],
              "mode": "nmap -sV --top-ports 100 (no -O: needs root)",
              "stderr": (err or "")[:200]})
     found, err = connect_fallback(ctx)
@@ -132,6 +160,14 @@ def run(ctx, timeout=180, runner=run_cmd):
     return adapter_result(
         NAME, NOT_INSTALLED, _findings_for(found),
         {"ip": ip, "open_ports": found, "open_count": len(found),
+         "service_confirmed_count": sum(
+             1 for p in found if p.get("state") == "service_confirmed"),
+         "tcp_open_count": sum(
+             1 for p in found if p.get("state") == "tcp_open"),
+         "service_confirmed_ports": [
+             p for p in found if p.get("state") == "service_confirmed"],
+         "tcp_open_ports": [
+             p for p in found if p.get("state") == "tcp_open"],
          "mode": "not_installed (fallback) — built-in connect scan",
          "note": "nmap is not installed; used the built-in TCP "
                  "connect scan instead. Install: tools install nmap",

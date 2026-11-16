@@ -47,14 +47,14 @@ def _ctx(url="http://127.0.0.1:9", authorized=True, **extra):
 
 class TestVersionAndHiveStructure(unittest.TestCase):
     def test_version_is_3_00(self):
-        self.assertEqual(__version__, "5.00")
+        self.assertEqual(__version__, "5.1")
 
     def test_hive_has_6_waves_55_plus_phases_24_engines(self):
         self.assertEqual(len(hive_mod.wave_names()), 6)
         self.assertIn("wave5-net", hive_mod.wave_names())
         self.assertEqual(len(PROFILES["hive"]), 24)
         self.assertGreaterEqual(hive_mod.total_phases(), 55)
-        self.assertEqual(hive_mod.total_phases(), 56)
+        self.assertEqual(hive_mod.total_phases(), 58)
 
     def test_hive_refuses_without_scope(self):
         with tempfile.TemporaryDirectory() as d:
@@ -64,9 +64,9 @@ class TestVersionAndHiveStructure(unittest.TestCase):
 
     def test_old_profiles_unchanged(self):
         from webdon.core import engine as engine_mod
-        self.assertEqual(engine_mod.total_phases("quick"), 13)
-        self.assertEqual(engine_mod.total_phases("deep"), 31)
-        self.assertEqual(engine_mod.total_phases("forensic"), 33)
+        self.assertEqual(engine_mod.total_phases("quick"), 15)
+        self.assertEqual(engine_mod.total_phases("deep"), 33)
+        self.assertEqual(engine_mod.total_phases("forensic"), 35)
 
 
 class TestNmapAdapter(unittest.TestCase):
@@ -95,7 +95,7 @@ class TestNmapAdapter(unittest.TestCase):
         ports = nmap_mod.parse_xml(self.SAMPLE_XML)
         self.assertEqual([p["port"] for p in ports], [22, 80, 445])
         ssh = ports[0]
-        self.assertEqual(ssh["state"], "service_identified")
+        self.assertEqual(ssh["state"], "service_confirmed")
         self.assertTrue(ssh["identified"])
         self.assertIn("OpenSSH", ssh["service"])
         # Port 80 has a service name but no product/version: it is
@@ -190,7 +190,7 @@ class TestOpenvasAdapter(unittest.TestCase):
     def test_heuristic_labels_old_openssh_banner(self):
         ctx = _ctx(ports_data={"open_ports": [
             {"port": 22, "service": "ssh",
-             "banner": "SSH-2.0-OpenSSH_5.9", "state": "service_identified"}]})
+             "banner": "SSH-2.0-OpenSSH_5.9", "state": "service_confirmed"}]})
         findings = openvas_mod.check_outdated(ctx)
         self.assertTrue(any("openssh" in f["name"] for f in findings))
 
@@ -199,7 +199,7 @@ class TestOpenvasAdapter(unittest.TestCase):
                    ports_data={"open_ports": [
                        {"port": 22, "service": "ssh",
                         "banner": "SSH-2.0-OpenSSH_9.6",
-                        "state": "service_identified"}]})
+                        "state": "service_confirmed"}]})
         self.assertEqual(openvas_mod.check_outdated(ctx), [])
 
     def test_run_is_bridge_not_a_real_scan(self):
@@ -440,13 +440,13 @@ class TestHiveLabNet(unittest.TestCase):
             scan = hive_mod.run_hive(
                 base, scope=scope,
                 settings={"scan_budget_s": 240})
-            self.assertEqual(scan["tool"], "WEBDON v5.00")
+            self.assertEqual(scan["tool"], "WEBDON v5.1")
             self.assertEqual(scan["kind"], "webdon-hive")
             self.assertEqual(scan["profile"], "hive")
             self.assertIsNotNone(scan["score"])
             self.assertGreaterEqual(
                 scan["coverage"]["phases_done"], 55)
-            self.assertEqual(scan["hive"]["phases"], 56)
+            self.assertEqual(scan["hive"]["phases"], 58)
             self.assertEqual(len(scan["hive"]["waves"]), 6)
             adapters = scan["hive"]["adapters"]
             for name in ("nmap", "wireshark", "openvas", "netexec",

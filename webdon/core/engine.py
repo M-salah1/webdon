@@ -37,7 +37,8 @@ from ..core import correlation as correlation_mod
 from ..core import evidence as evidence_mod
 from ..core import scoring as scoring_mod
 from ..core import validation as validation_mod
-from ..core.http import get, lower_headers, request_retry, resolve_ips
+from ..core.http import (USER_AGENT, get, lower_headers,
+                           request_retry, resolve_ips)
 from ..core.scope import normalize_url
 from ..engines import BY_NAME, PHASES, PROFILES
 
@@ -134,6 +135,18 @@ def _build_ctx(url, scope):
     ctx["status"] = r.get("status")
     ctx["html"] = r.get("body") or ""
     ctx["headers"] = lower_headers(r.get("headers") or {})
+    # v5.1 EVIDENCE BUNDLES — the homepage request/response that
+    # produced the HTTP-engine findings (redacted at bundle time).
+    ctx["request"] = {"method": "GET", "url": url,
+                      "headers": {"User-Agent": USER_AGENT},
+                      "body_excerpt": ""}
+    try:
+        resp_headers = dict(r.get("headers") or {})
+    except Exception:
+        resp_headers = {}
+    ctx["response"] = {"status": r.get("status"),
+                       "headers": resp_headers,
+                       "body_excerpt": (r.get("body") or "")[:4000]}
     try:
         ctx["cookie_headers"] = list(
             r.get("headers").get_all("Set-Cookie") or [])
@@ -171,7 +184,7 @@ def _finalize(url, profile, engines, results, status, ctx, t0, authorized):
         elif (f.get("validation") or {}).get("status") == "verified":
             f["confirmation"] = "confirmed"
         elif f.get("confirmation") != "confirmed":
-            f["confirmation"] = "indicator"
+            f["confirmation"] = "suspected"
     # (enrichment happens after the severity sort, below, so F-001
     # is the most severe finding.)
     assets = assets_mod.build_assets({"results": results}, ctx)
@@ -230,6 +243,53 @@ def _finalize(url, profile, engines, results, status, ctx, t0, authorized):
         f.setdefault("parent_id", None)
         f.setdefault("follow_ups", [])
         f.setdefault("chain", f.get("finding_id"))
+    # v5.1 PROFESSIONAL ASSURANCE — sufficiency gate, AFTER
+    # validation and (in hive) after the deep-dive: a finding
+    # reaches `confirmed` ONLY when its evidence meets its type's
+    # minimum; otherwise it stays `suspected` with the gap named.
+    # The score is recomputed after the gate (a demoted finding
+    # weighs half, like any suspected finding).
+    from ..core import assurance as assurance_mod
+    assurance_mod.apply_assurance(findings, ctx)
+    assurance_mod.apply_assurance(false_positives, ctx)
+    assurance_mod.apply_assurance(chains, ctx)
+    if coverage["percent"] < 50 or not reachable:
+        score = None
+        grade = "INCOMPLETE"
+        dist = {}
+        for f in findings:
+            dist[f["severity"]] = dist.get(f["severity"], 0) + 1
+    else:
+        score, grade, dist = scoring_mod.score_findings(findings)
+    # v5.1 EVIDENCE BUNDLES — one standalone bundle per finding.
+    bundles = assurance_mod.build_bundles(
+        findings + false_positives, ctx)
+    for f, b in zip(findings + false_positives, bundles):
+        f["evidence_bundle_id"] = b["bundle_id"]
+    # v5.1 summaries: two-tier ports + WAF likelihood.
+    ports_data = (results.get("ports") or {}).get("data") or {}
+    nmap_data = (results.get("nmap") or {}).get("data") or {}
+    ports_summary = {
+        "service_confirmed": ports_data.get(
+            "service_confirmed_count", 0),
+        "tcp_open": ports_data.get("tcp_open_count", 0),
+        "open_count": ports_data.get("open_count", 0),
+        "nmap_service_confirmed": nmap_data.get(
+            "service_confirmed_count", 0),
+        "nmap_tcp_open": nmap_data.get("tcp_open_count", 0),
+        "note": "tcp_open ports answered TCP but sent no banner — "
+                "informational only, never services, never scored",
+    }
+    protect_data = (results.get("protect") or {}).get("data") or {}
+    waf_summary = {
+        "waf_likelihood": protect_data.get("waf_likelihood"),
+        "verdict": protect_data.get("waf_verdict"),
+        "signals_observed": [
+            sg["signal"] for sg in
+            (protect_data.get("waf_signals") or [])
+            if sg.get("observed")],
+        "checks_performed": protect_data.get("waf_checks") or [],
+    }
     scan = {
         "tool": "WEBDON v%s" % __version__, "target": url, "profile": profile,
         "kind": "webdon-scan",
@@ -251,6 +311,9 @@ def _finalize(url, profile, engines, results, status, ctx, t0, authorized):
                     "verification_rate": verification_rate},
         "engines": engines, "engine_status": status,
         "results": results, "findings": findings,
+        "evidence_bundles": bundles,
+        "ports_summary": ports_summary,
+        "waf_summary": waf_summary,
         "severity_distribution": dist,
         "evidence": evidence, "validation": validation_counts,
         "false_positives": false_positives,
@@ -264,6 +327,11 @@ def _finalize(url, profile, engines, results, status, ctx, t0, authorized):
         "ips": ctx["ips"], "host": ctx["host"], "domain": ctx["domain"],
         "unreachable": not reachable,
     }
+    try:
+        from ..core import report as report_mod
+        scan["coverage_table"] = report_mod.coverage_table(scan)
+    except Exception:
+        scan["coverage_table"] = []
     scan["summary"] = summary_mod.build_summary(scan)
     return scan
 

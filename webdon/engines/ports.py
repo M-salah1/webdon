@@ -2,11 +2,17 @@
 # -*- coding: utf-8 -*-
 """Ports engine — TCP connect scan of common ports (authorized only).
 
-Connects to the resolved target IP on 19 common ports with a
-per-port timeout and classifies each open port by service state:
-tcp_open (answered, no banner — often a firewall answering SYNs),
-service_identified (banner matched), service_confirmed (protocol
-greeting answered, e.g. HTTP response or TLS handshake).
+v5.1 TWO-TIER classification — every port result is exactly one of:
+
+- tcp_open: SYN/connect answered, NO banner or protocol response
+  identified. INFORMATIONAL ONLY — never a vulnerability, never
+  counted in the score. Often a firewall answering SYNs, not a
+  service at all. Never again reported as "61 open ports" meaning
+  61 services.
+- service_confirmed: a banner or protocol response was matched to
+  a service/version (SSH banner, HTTP response, TLS handshake,
+  MySQL/Redis/PostgreSQL greeting...). Only a service_confirmed
+  port on a risky service is a real finding.
 
 No authentication is ever attempted — no logins, no commands.
 Authorized targets only: without a signed scope the engine
@@ -81,8 +87,9 @@ def check_port(ip, port, timeout=0.5):
     try:
         banner = _grab(sock)
         service, confirmed = _identify(banner)
-        state = "service_confirmed" if confirmed else (
-            "service_identified" if service else "tcp_open")
+        # v5.1: only two tiers. A matched banner IS a confirmation.
+        state = "service_confirmed" if (confirmed or service) \
+            else "tcp_open"
         tls_info = None
         if port in TLS_PORTS:
             try:
@@ -147,34 +154,46 @@ def run(ctx):
     for item in open_ports:
         if item["port"] not in RISKY_PORTS:
             continue
-        if item["state"] in ("service_confirmed", "service_identified"):
+        if item["state"] == "service_confirmed":
             findings.append({
                 "severity": "high", "confirmation": "confirmed",
-                "name": "Sensitive service %s: %s on port %d"
-                        % (item["state"].replace("_", " "),
-                           item["service"], item["port"]),
-                "evidence": "port %d %s, banner: %s"
-                            % (item["port"], item["state"],
-                               item.get("banner") or "—"),
+                "name": "Sensitive service confirmed: %s on port %d"
+                        % (item["service"], item["port"]),
+                "evidence": "port %d service_confirmed, banner: %s"
+                            % (item["port"], item.get("banner") or "—"),
                 "fix": "Close port %d to the internet or restrict it "
-                       "to trusted networks only." % item["port"]})
+                       "to trusted networks only." % item["port"],
+                "port_state": "service_confirmed",
+                "port_class": "service_confirmed",
+                "banner": item.get("banner") or ""})
         else:
+            # tcp_open: informational ONLY — never a vulnerability,
+            # never scored. The service (if any) is unidentified.
             findings.append({
-                "severity": "info", "confirmation": "indicator",
-                "name": "Port %d open but service unidentified"
-                        % item["port"],
+                "severity": "info", "confirmation": "info",
+                "name": "Port %d open but service unidentified "
+                        "(tcp_open)" % item["port"],
                 "evidence": "port %d answered TCP but sent no banner "
                             "— often a firewall answering SYNs, not a "
-                            "service" % item["port"],
+                            "service. tcp_open is informational only."
+                            % item["port"],
                 "fix": "Confirm from inside the network whether a "
                        "service really listens on port %d."
-                       % item["port"]})
+                       % item["port"],
+                "port_state": "tcp_open",
+                "port_class": "tcp_open"})
+    tcp_open_ports = [i for i in open_ports
+                      if i["state"] == "tcp_open"]
+    confirmed_ports = [i for i in open_ports
+                       if i["state"] == "service_confirmed"]
     return {"engine": NAME, "status": "completed", "findings": findings,
             "data": {"ip": ip, "open_ports": open_ports,
                      "open_count": len(open_ports),
                      "by_state": by_state,
-                     "confirmed_count": by_state.get(
-                         "service_confirmed", 0)
-                     + by_state.get("service_identified", 0),
+                     "tcp_open_count": len(tcp_open_ports),
+                     "service_confirmed_count": len(confirmed_ports),
+                     "tcp_open_ports": tcp_open_ports,
+                     "service_confirmed_ports": confirmed_ports,
+                     "confirmed_count": len(confirmed_ports),
                      "probed": len(COMMON_PORTS),
                      "total": len(COMMON_PORTS)}}

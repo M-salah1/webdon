@@ -58,6 +58,105 @@ def net_section(scan):
     return rows
 
 
+# v5.1 COVERAGE TRANSPARENCY — one row per engine/adapter.
+ALL_COVERAGE_ENGINES = [
+    "crawl", "headers", "tls", "tech", "httpx", "subfinder",
+    "dns", "whois", "cookies", "cors", "protect", "paths",
+    "katana", "nuclei", "ports", "naabu", "schemathesis",
+    "ipintel", "timeline", "nmap", "wireshark", "openvas",
+    "netexec", "bloodhound",
+]
+
+
+def coverage_table(scan):
+    """Per-engine coverage table for a scan (v5.1).
+
+    Every one of the 24 engines/adapters gets a row: `ran` (with
+    phases completed), `fallback` (what replaced it and why),
+    `skipped` (why: tool not installed, not applicable, not in
+    profile), `failed` (error, redacted). Returns a list of
+    {"engine", "status", "detail", "reason", "phases"}.
+    """
+    from ..engines import PHASES as _PHASES
+    from ..adapters import sanitize as _sanitize
+
+    results = scan.get("results") or {}
+    status = scan.get("engine_status") or {}
+    engines = scan.get("engines") or []
+    profile = scan.get("profile") or ""
+    rows = []
+    for name in ALL_COVERAGE_ENGINES:
+        run = status.get(name) or {}
+        res = results.get(name) or {}
+        data = res.get("data") or {}
+        st = run.get("status") or res.get("status") or "not_run"
+        phases = len(_PHASES.get(name, [name]))
+        detail = (data.get("mode") or data.get("note") or "")[:120]
+        if st == "completed":
+            state, reason = "ran", "completed, %d phase(s)" % phases
+        elif st in ("not_installed (fallback)", "fallback"):
+            state = "fallback"
+            reason = (data.get("note") or data.get("mode")
+                      or "external tool not installed — built-in "
+                         "equivalent ran instead")
+        elif st in ("skipped", "skipped_no_schema", "not_applicable"):
+            state = "skipped"
+            reason = (data.get("note") or data.get("reason")
+                      or "not applicable to this target")
+        elif st in ("timeout", "error"):
+            state = "failed"
+            reason = _sanitize(
+                (run.get("error") or data.get("error") or "error"))[:120]
+        elif name not in engines:
+            state = "skipped"
+            reason = "not in profile %s" % profile
+        else:
+            state = "skipped"
+            reason = "not run"
+        rows.append({"engine": name, "status": state,
+                     "raw_status": st, "detail": detail,
+                     "reason": reason, "phases": phases})
+    return rows
+
+
+def print_coverage_table(scan):
+    """Terminal rendering of the per-engine coverage table."""
+    rows = scan.get("coverage_table") or coverage_table(scan)
+    print("Coverage per engine:")
+    for row in rows:
+        line = "  • %-12s %-9s %s" % (row["engine"], row["status"],
+                                      row["reason"])
+        detail = (row.get("detail") or "")[:60]
+        if detail and detail not in row["reason"]:
+            line += " — %s" % detail
+        print(line)
+
+
+def ports_summary_line(scan):
+    """Terminal ports line: two-tier counts, never 'N open ports'."""
+    ps = scan.get("ports_summary") or {}
+    ports_data = ((scan.get("results") or {}).get("ports") or {}) \
+        .get("data") or {}
+    confirmed = ps.get("service_confirmed",
+                       ports_data.get("service_confirmed_count", 0))
+    tcp_open = ps.get("tcp_open", ports_data.get("tcp_open_count", 0))
+    return ("ports: %d service_confirmed, %d tcp_open (unidentified)"
+            % (confirmed, tcp_open))
+
+
+def waf_summary_line(scan):
+    """Terminal WAF line: likelihood + signals, never 'no WAF'."""
+    ws = scan.get("waf_summary") or {}
+    protect_data = ((scan.get("results") or {}).get("protect") or {}) \
+        .get("data") or {}
+    likelihood = ws.get("waf_likelihood",
+                        protect_data.get("waf_likelihood"))
+    verdict = ws.get("verdict", protect_data.get("waf_verdict"))
+    if likelihood is None:
+        return "WAF likelihood: unknown (protect engine did not run)"
+    return ("WAF likelihood: %d%% — %s" % (likelihood, verdict or ""))
+
+
 def deepdive_summary(scan):
     """The v5.00 deep-dive block of a scan (defaults for old scans)."""
     dd = scan.get("deepdive") or {}
@@ -229,6 +328,19 @@ def _print_finding(f, lang):
                                      (" — corroborated by %s" % ", ".join(
                                          f.get("corroborated_by") or []))
                                      if f.get("corroborated_by") else ""))
+    # v5.1 assurance: evidence score + sufficiency + gap, and the
+    # standalone evidence bundle id.
+    if "evidence_score" in f:
+        suf = f.get("sufficiency") or {}
+        print("      Assurance: evidence_score=%s/100  sufficiency=%s%s"
+              % (f.get("evidence_score"),
+                 "pass" if suf.get("pass") else "FAIL",
+                 (" — gap: %s" % f.get("evidence_gap"))
+                 if f.get("evidence_gap") else ""))
+    if f.get("evidence_bundle_id"):
+        print("      Evidence bundle: %s (evidence show <scan-id> %s)"
+              % (f.get("evidence_bundle_id"),
+                 f.get("finding_id", "")))
     rem = f.get("remediation") or {}
     if rem.get("summary"):
         print("      Fix: %s" % rem["summary"][:200])
@@ -261,6 +373,17 @@ def print_report(scan, lang="ar"):
     print("Phases: %d/%d" % (
         (scan.get("coverage") or {}).get("phases_done", 0),
         (scan.get("coverage") or {}).get("phases_total", 0)))
+    # v5.1: the four measures, always as four separate numbers.
+    print("Four measures (separate, never merged): score=%s  "
+          "confidence=%s%%  coverage=%s%%  verification_rate=%s%%" % (
+              "INCOMPLETE" if scan.get("score") is None
+              else "%s%%" % scan.get("score"),
+              scan.get("confidence", 0),
+              (scan.get("coverage") or {}).get("percent", 0),
+              (scan.get("metrics") or {}).get("verification_rate", 0)))
+    print(ports_summary_line(scan))
+    print(waf_summary_line(scan))
+    print_coverage_table(scan)
     print_deepdive(scan)
     if scan.get("chains"):
         print("%s:" % t(lang, "chains"))
@@ -354,7 +477,7 @@ def to_json_report(scan, path):
     evidence/CVSS/CWE/remediation, scores, coverage, timeline
     references and suppressed false positives."""
     report = {
-        "report_version": "5.00",
+        "report_version": "5.1",
         "tool": scan.get("tool", TOOL_LABEL),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                       time.gmtime()),
@@ -371,6 +494,11 @@ def to_json_report(scan, path):
                                  .get("verification_rate"),
         },
         "coverage": scan.get("coverage"),
+        "coverage_table": scan.get("coverage_table")
+                          or coverage_table(scan),
+        "ports_summary": scan.get("ports_summary") or {},
+        "waf_summary": scan.get("waf_summary") or {},
+        "evidence_bundles": scan.get("evidence_bundles") or [],
         "validation": scan.get("validation"),
         "severity_distribution": scan.get("severity_distribution"),
         "findings": scan.get("findings") or [],
@@ -471,7 +599,9 @@ def to_html(scan, path):
             "<td>%s</td><td>%s</td>"
             "<td><details><summary>evidence</summary>"
             "Observed: %s<br>Location: %s<br>Method: %s<br>"
-            "Engine: %s<br>Time: %s<br>Validation: %s (%s%%)%s"
+            "Engine: %s<br>Time: %s<br>Validation: %s (%s%%)%s<br>"
+            "Assurance: evidence_score %s/100, sufficiency %s%s<br>"
+            "Evidence bundle: %s%s"
             "</details></td>"
             "<td><details><summary>remediation</summary>%s</details>"
             "</td></tr>"
@@ -490,6 +620,17 @@ def to_html(scan, path):
                ("<br>Corroborated by: " + esc(", ".join(
                    f.get("corroborated_by") or "")))
                if f.get("corroborated_by") else "",
+               esc(f.get("evidence_score", "")),
+               esc("pass" if (f.get("sufficiency") or {}).get("pass")
+                   else "FAIL"),
+               (" — gap: " + esc(f.get("evidence_gap") or ""))
+               if f.get("evidence_gap") else "",
+               esc(f.get("evidence_bundle_id", "")),
+               (" — request/response stored" if any(
+                   b.get("finding_id") == f.get("finding_id")
+                   and b.get("request_response")
+                   for b in (scan.get("evidence_bundles") or []))
+                else " — no request/response (see bundle reason)"),
                rem_html or "—"))
     engines = ""
     for name in scan.get("engines") or []:
@@ -512,6 +653,31 @@ def to_html(scan, path):
         for fp in scan.get("false_positives") or [])
     fps_html = ("<h2>Suppressed false positives</h2><ul>%s</ul>" % fps
                 if fps else "")
+    cov_rows = "".join(
+        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            esc(r["engine"]), esc(r["status"]), esc(r["reason"]),
+            esc(r.get("detail") or ""))
+        for r in (scan.get("coverage_table") or coverage_table(scan)))
+    cov_html = ("<h2>Coverage per engine</h2>"
+                "<table><thead><tr><th>Engine</th><th>Status</th>"
+                "<th>Reason</th><th>Detail</th></tr></thead><tbody>%s"
+                "</tbody></table>" % cov_rows)
+    ps = scan.get("ports_summary") or {}
+    ports_data = ((scan.get("results") or {}).get("ports") or {}) \
+        .get("data") or {}
+    conf_ports = ports_data.get("service_confirmed_ports") or []
+    tcp_ports = ports_data.get("tcp_open_ports") or []
+    ports_html = ("<h2>Ports (two-tier)</h2><p>%s</p>"
+                  "<h3>service_confirmed</h3><ul>%s</ul>"
+                  "<h3>tcp_open (unidentified — informational only)</h3>"
+                  "<ul>%s</ul>" % (
+                      esc(ports_summary_line(scan)),
+                      "".join("<li>port %s — %s</li>" % (
+                          esc(p.get("port")), esc(p.get("service")))
+                          for p in conf_ports) or "<li>none</li>",
+                      "".join("<li>port %s</li>" % esc(p.get("port"))
+                          for p in tcp_ports) or "<li>none</li>"))
+    waf_html = "<h2>WAF</h2><p>%s</p>" % esc(waf_summary_line(scan))
     def _node_html(node):
         f = node["finding"]
         label = "%s [%s|depth %s] %s (%s)" % (
@@ -579,6 +745,9 @@ Findings marked as false positives by the operator are suppressed
 from the score and listed below, never silently deleted.</p>
 <h2>Engines</h2><ul>%s</ul>
 %s
+%s
+%s
+%s
 <h2>Findings</h2>
 <input id="q" type="text" placeholder="Filter findings..."
  oninput="filterRows()">
@@ -621,7 +790,8 @@ rows.forEach(function(r){tb.appendChild(r);});}
         esc((scan.get("coverage") or {}).get("percent", 0)),
         esc((scan.get("metrics") or {}).get("verification_rate", 0)),
         esc(scan.get("duration_s")), top, _sev_chart(dist), engines,
-        net_html, rows, fps_html, chains_html, limits,
+        net_html, cov_html, ports_html, waf_html, rows, fps_html,
+        chains_html, limits,
         "".join("<li>%s</li>" % esc(x)
                 for x in scan.get("recommendations") or []),
         __version__)

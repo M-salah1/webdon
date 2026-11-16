@@ -6,7 +6,8 @@ Four separate metrics, each measured, none of them a guess:
 
 - Security Score: only findings that survived validation count,
   and only at their confirmation level — a confirmed vulnerability
-  weighs full, an indicator (needs a human to confirm) weighs half,
+  weighs full, a suspected finding (v5.1: confirmation "suspected",
+  the old "indicator" — needs a human to confirm) weighs half,
   a false positive weighs nothing, and plain information weighs
   nothing.
 - Confidence: computed from the validation outcome, never fixed.
