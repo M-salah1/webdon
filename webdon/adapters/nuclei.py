@@ -36,9 +36,12 @@ def build_args(url):
 def parse_jsonl(text):
     """Parse Nuclei JSONL output into unified findings.
 
-    Only template-id, severity, name and matched host are kept.
-    `request` / `response` / `curl-command` fields are dropped by
-    the sanitizer — a matched template never leaks a body here.
+    Only template-id, severity, name and matched host are kept,
+    plus the template's own classification (cve-id / cwe-id /
+    cvss-metrics / cvss-score) when present — that is real data
+    from the template, used for the finding's CVSS/CWE. `request`
+    / `response` / `curl-command` fields are dropped by the
+    sanitizer — a matched template never leaks a body here.
     """
     findings = []
     templates = []
@@ -56,7 +59,7 @@ def parse_jsonl(text):
         sev = SEVERITY_MAP.get(
             str(info.get("severity", "info")).lower(), "info")
         templates.append(tid)
-        findings.append(finding(
+        f = finding(
             sev, "Nuclei: %s" % tid,
             "template %s matched on %s"
             % (tid, str(item.get("host") or item.get("matched-at")
@@ -64,7 +67,22 @@ def parse_jsonl(text):
             "Review template %s and fix the reported issue on the "
             "target; re-run to confirm." % tid,
             confirmation="confirmed" if sev in ("critical", "high")
-            else "indicator"))
+            else "indicator")
+        classification = info.get("classification") or {}
+        cve_ids = classification.get("cve-id")
+        if isinstance(cve_ids, list) and cve_ids:
+            f["cve_id"] = str(cve_ids[0])
+        elif isinstance(cve_ids, str) and cve_ids:
+            f["cve_id"] = cve_ids
+        cwe_ids = classification.get("cwe-id")
+        if isinstance(cwe_ids, list) and cwe_ids:
+            f["cwe_id"] = str(cwe_ids[0])
+        elif isinstance(cwe_ids, str) and cwe_ids:
+            f["cwe_id"] = cwe_ids
+        vector = classification.get("cvss-metrics")
+        if isinstance(vector, str) and vector.startswith("CVSS:"):
+            f["cvss_vector"] = vector
+        findings.append(f)
     return findings, templates
 
 

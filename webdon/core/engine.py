@@ -31,11 +31,12 @@ import time
 
 from .. import __version__
 from ..core import assets as assets_mod
+from ..core import enrich as enrich_mod
 from ..core import summary as summary_mod
 from ..core import correlation as correlation_mod
 from ..core import evidence as evidence_mod
 from ..core import scoring as scoring_mod
-from ..core import validator as validator_mod
+from ..core import validation as validation_mod
 from ..core.http import get, lower_headers, request_retry, resolve_ips
 from ..core.scope import normalize_url
 from ..engines import BY_NAME, PHASES, PROFILES
@@ -151,7 +152,10 @@ def _finalize(url, profile, engines, results, status, ctx, t0, authorized):
             item["engine"] = name
             raw.append(item)
     evidence = evidence_mod.collect(raw)
-    evidence = validator_mod.validate_all(evidence, ctx)
+    # v4.00 EVIDENCE — validation stage: re-probe every suspected
+    # finding once, apply the known-FP ruleset, then corroborate
+    # findings backed by 2+ independent engines.
+    evidence = validation_mod.run(evidence, ctx)
     validation_counts = {"verified": 0, "observed": 0, "false_positive": 0}
     kept = []
     false_positives = []
@@ -168,6 +172,8 @@ def _finalize(url, profile, engines, results, status, ctx, t0, authorized):
             f["confirmation"] = "confirmed"
         elif f.get("confirmation") != "confirmed":
             f["confirmation"] = "indicator"
+    # (enrichment happens after the severity sort, below, so F-001
+    # is the most severe finding.)
     assets = assets_mod.build_assets({"results": results}, ctx)
 
     phases_done = sum(len(PHASES.get(n, [n])) for n in engines
@@ -197,9 +203,39 @@ def _finalize(url, profile, engines, results, status, ctx, t0, authorized):
     completed = [n for n in engines
                  if (status.get(n) or {}).get("status")
                  in scoring_mod.DONE_STATUSES]
+    # v4.00 EVIDENCE — enrich every finding (and every chain and
+    # every suppressed false positive): stable id + key, structured
+    # evidence object, CWE + computed CVSS, precise remediation.
+    # Ids follow the severity sort above, so F-001 is most severe,
+    # and they continue across lists — one scan never has two
+    # findings with the same id (mark-fp / unmark need this).
+    findings = enrich_mod.enrich_all(findings, ctx)
+    false_positives = enrich_mod.enrich_all(
+        false_positives, ctx, start=len(findings) + 1)
+    for c in chains:
+        c.setdefault("engine", "correlation")
+    chains = enrich_mod.enrich_all(
+        chains, ctx, start=len(findings) + len(false_positives) + 1)
+    # v5.00 DEEP-DIVE — every finding carries its chain position:
+    # depth 0 for L0 findings, parent null, follow_ups empty, and
+    # chain = its own id. The hive deep-dive fills these in for
+    # deeper findings; old scans are migrated on load (storage).
+    for f in findings:
+        f.setdefault("depth", 0)
+        f.setdefault("parent_id", None)
+        f.setdefault("follow_ups", [])
+        f.setdefault("chain", f.get("finding_id"))
+    for f in false_positives:
+        f.setdefault("depth", 0)
+        f.setdefault("parent_id", None)
+        f.setdefault("follow_ups", [])
+        f.setdefault("chain", f.get("finding_id"))
     scan = {
         "tool": "WEBDON v%s" % __version__, "target": url, "profile": profile,
         "kind": "webdon-scan",
+        "deepdive": {"status": "not_run", "max_depth": 0, "deepest": 0,
+                     "probes_run": 0, "new_findings": 0,
+                     "new_findings_by_depth": {}, "stop_reason": None},
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                     time.gmtime(time.time() - duration)),
         "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -217,10 +253,7 @@ def _finalize(url, profile, engines, results, status, ctx, t0, authorized):
         "results": results, "findings": findings,
         "severity_distribution": dist,
         "evidence": evidence, "validation": validation_counts,
-        "false_positives": [
-            {"name": ev["name"], "engine": ev["engine"],
-             "evidence": ev["evidence"],
-             "validation": ev["validation"]} for ev in false_positives],
+        "false_positives": false_positives,
         "chains": chains, "contradictions": contradictions,
         "assets": assets,
         "limits": dict(LIMITS),

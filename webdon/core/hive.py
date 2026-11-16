@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""HIVE — one command runs everything, like a beehive (v3.00).
+"""HIVE — one command runs everything, like a beehive (v5.00).
 
 `hive <url>` / `auto <url>` / `python3 webdon.py --hive <url>`:
 the operator gives only the URL; WEBDON runs six waves in
@@ -11,14 +11,22 @@ parallel inside the normal engine machinery:
                       katana, nuclei
   Wave 3 — vuln/scan: ports, naabu, schemathesis (schema only)
   Wave 4 — IP alone:  ipintel, timeline
-  Wave 5 — NET:       nmap, wireshark, openvas, then netexec +
+  Wave 5 — NET:       nmap, wireshark, openvas, netexec +
                       bloodhound (AD applicability from merged ports)
   Wave 6 — report:    unified score + JSON/HTML.
+
+v5.00 DEEP-DIVE — after the six waves, every finding is
+followed up recursively (max depth 3 by default, `--depth N`
+1-5): missing header -> audit it on every crawled page, open
+port -> banner + neighbours + NVD, subdomain -> mini-scan,
+exposed config -> sibling HEAD checks, and so on. Same one
+command, no extra input. `deep <url>` is hive with depth 3.
 
 Every wave runs under the same budgets, timeouts and scope gate
 as a normal scan; partial results are saved and resumable.
 No artificial delays — thoroughness comes from engine breadth.
 """
+from . import deepdive as deepdive_mod
 from . import engine as engine_mod
 from ..adapters import manager as manager_mod
 from ..engines import PHASES
@@ -74,11 +82,16 @@ def adapter_status(scan):
 
 
 def run_hive(url, scope=None, settings=None, progress=None,
-             schema_path=None):
-    """Run a full HIVE investigation. Refuses without a signed scope.
+             schema_path=None, depth=None):
+    """Run a full HIVE investigation + recursive deep-dive.
 
-    Raises PermissionError when the target has no signed scope.
-    Returns the scan dict with an extra "hive" block.
+    Refuses without a signed scope. Raises PermissionError when
+    the target has no signed scope. Returns the scan dict with
+    an extra "hive" block and a "deepdive" block.
+
+    `depth` (1-5, default 3) caps how deep the dive follows a
+    finding; values outside clamp with a warning in the
+    deep-dive block (`depth_clamped: true`).
     """
     from ..core.scope import normalize_url
     url = normalize_url(url)
@@ -89,6 +102,8 @@ def run_hive(url, scope=None, settings=None, progress=None,
     if schema_path:
         settings["schema_path"] = schema_path
     settings.setdefault("scan_budget_s", 900)
+    if depth is not None:
+        settings["depth"] = depth
     scan = engine_mod.run_scan(url, profile=HIVE_PROFILE, scope=scope,
                                settings=settings, progress=progress)
     scan["kind"] = "webdon-hive"
@@ -99,4 +114,17 @@ def run_hive(url, scope=None, settings=None, progress=None,
         "tools": {t["name"]: t["status"]
                   for t in manager_mod.list_all()},
     }
+    # Deep-dive stage (v5.00) — recursive follow-ups on every
+    # finding, same scope, same budgets. Never raises out of
+    # run_hive: a failed dive is recorded, the hive scan stands.
+    try:
+        deepdive_mod.apply_to_scan(scan, scope, settings=settings)
+    except PermissionError:
+        raise
+    except Exception as exc:
+        scan["deepdive"] = {
+            "status": "error", "max_depth": 0, "deepest": 0,
+            "probes_run": 0, "new_findings": 0,
+            "new_findings_by_depth": {}, "stop_reason": None,
+            "error": str(exc)[:200]}
     return scan

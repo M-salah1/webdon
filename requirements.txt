@@ -1,4 +1,4 @@
-# WEBDON v3.00 NET — no core dependencies.
+# WEBDON v5.00 DEEP-DIVE — no core dependencies.
 # Python standard library only: no pip install needed in Termux.
 # (This file intentionally lists no core packages.)
 #

@@ -1,4 +1,4 @@
-# WEBDON v3.00 NET — Heavy Website Investigation System
+# WEBDON v5.00 DEEP-DIVE — Heavy Website Investigation System
 
 **Developer:** Hafed Mehdi Salah Eddine — Algeria
 **Organization:** FOX COMPANY
@@ -7,9 +7,18 @@
 
 WEBDON is a heavy, modular, defensive website audit tool: **24 engines**,
 **4 profiles** (QUICK / DEEP / FORENSIC / HIVE), **56 phases in HIVE**
-(33 in FORENSIC, 31 in DEEP), SQLite history, JSON/HTML reports, and an
+(33 in FORENSIC, 31 in DEEP), SQLite history, JSON/HTML/PDF reports, and an
 interactive console. It takes its time and investigates thoroughly —
 breadth of engines and pages crawled, never artificial delays.
+
+**v5.00 DEEP-DIVE** adds recursive investigation: when a scan finds
+a result, WEBDON follows it up with deeper probes on that exact
+result — and when those probes find more, it goes deeper again
+(max depth 3 by default, probe + time budgets, full dedup). Every
+finding gains depth / parent / chain, and the reports show the
+investigation trees. See [v5.00 DEEP-DIVE](#v500-deep-dive--recursive-investigation)
+below. v4.00 EVIDENCE (evidence + CVSS/CWE + remediation +
+professional reports) is unchanged underneath.
 
 ## HIVE — one command runs everything (خلية النحل)
 
@@ -22,7 +31,7 @@ Give only the URL; WEBDON runs five parallel waves like a beehive:
 | 3 — vuln | ports, Naabu, Schemathesis (schema only) |
 | 4 — IP alone | the resolved IP re-investigated by itself (reverse DNS, ASN, geo, hosting, ports) + timeline |
 | 5 — NET | **network & systems tools**: Nmap service scan, Wireshark traffic analysis, OpenVAS outdated-service heuristic + GVM bridge, NetExec AD check, BloodHound CE bridge |
-| 6 — report | unified score + JSON/HTML report, with a dedicated "Network & Systems" section |
+| 6 — report | unified score + JSON/HTML/PDF report, with a dedicated "Network & Systems" section, evidence + CVSS/CWE + remediation on every finding |
 
 ```bash
 webdon > hive https://example.com
@@ -119,7 +128,7 @@ bridges — WEBDON never pretends they ran inside Termux.
 
 ```bash
 pkg update && pkg install -y python git
-unzip webdon-v3.00.zip
+unzip webdon-v5.00.zip
 cd webdon
 python3 webdon.py
 ```
@@ -131,6 +140,8 @@ No dependencies to install — Python standard library only.
 ```bash
 python3 webdon.py                                  # console
 python3 webdon.py --hive https://example.com --json webdon-report.json
+python3 webdon.py --hive https://example.com --depth 2   # deep-dive depth cap (1-5, default 3)
+python3 webdon.py --hive https://example.com --pdf webdon-report.pdf
 python3 webdon.py --scan https://example.com --profile deep --json webdon-report.json
 python3 webdon.py --scan https://example.com --profile forensic --html webdon-report.html
 python3 webdon.py --version
@@ -142,6 +153,8 @@ Console:
 webdon > scope create https://example.com   # sign authorization first
 webdon > scope list
 webdon > hive https://example.com           # HIVE: everything, one command
+webdon > hive https://example.com --depth 2  # same, deep-dive capped at depth 2
+webdon > deep https://example.com           # hive + deep-dive (depth 3)
 webdon > auto https://example.com           # same as hive
 webdon > tools list                         # status of all 14 tools
 webdon > tools install nuclei               # install a tool (Termux ARM64)
@@ -165,7 +178,17 @@ webdon > engine headers https://example.com # run one engine alone
 webdon > history                            # previous scans
 webdon > summary 1                          # executive summary of scan #1
 webdon > report generate 1 html             # export a stored scan
+webdon > report html 1                      # interactive HTML report (v4.00)
+webdon > report pdf 1                       # professional PDF report (v4.00)
+webdon > report json 1                      # full machine-readable report
+webdon > report compare 1 2                 # new / fixed / persisting (v4.00)
+webdon > report timeline https://example.com # history of one target (v4.00)
 webdon > compare 1 2                        # diff two scans
+webdon > report chains 1                    # every investigation tree (v5.00)
+webdon > findings chain 1 F-014             # one investigation tree (v5.00)
+webdon > findings list 1                    # findings with ids (v4.00)
+webdon > findings mark-fp 1 F-003 "Cloudflare header, no version"  # suppress a false positive
+webdon > findings unmark 1 F-003            # restore a suppressed finding
 webdon > resume 1                           # re-run timed-out engines
 webdon > profile deep
 webdon > lang
@@ -175,7 +198,7 @@ webdon > exit
 ```
 
 After a scan the dashboard offers: findings, JSON export, HTML
-export, Verify.
+export, PDF export, Verify.
 
 ## Professional tools — adapters (v2.00 HIVE + v3.00 NET)
 
@@ -248,12 +271,112 @@ status honest, never invented.
 | NetExec | Windows/AD assessment | Runs on Termux via `pip install netexec`, but only for Windows/AD hosts and only with explicit opt-in (`netexec run <ip>`), anonymous only |
 | BloodHound CE | AD relationship/permission analysis | **Server/PC only** — needs a Neo4j server + SharpHound collection from a domain host. WEBDON exports the plan and summarizes a supplied collection |
 
+## v4.00 EVIDENCE — evidence, accuracy, professional reporting
+
+نموذج الأدلة والتقارير الاحترافية — كل نتيجة تحمل دليلاً، وCWE وCVSS محسوبين، وإصلاحاً دقيقاً.
+
+### Evidence model — نموذج الدليل
+
+Every finding carries a structured evidence object (`evidence_obj`),
+shown in the terminal, HTML and JSON reports:
+
+| Field | Meaning |
+| ----- | ------- |
+| `observed` | the redacted observed value (never a secret/cookie/session value) |
+| `location` | exact URL / path / host:port where it was seen |
+| `timestamp` | UTC time of the observation |
+| `engine` | the producing engine |
+| `method` | how it was probed (e.g. `GET https://… — response headers`, `HEAD /path — existence check, body never read`) |
+| `observation` | one-line raw observation summary |
+
+A finding with no evidence object is **rejected by the validator** —
+never scored silently. Old scans (string evidence only) are migrated
+on load: `evidence_obj` is rebuilt from the old string. The sanitizer
+strips credential/session/cookie values from evidence strings too
+(`Set-Cookie: sessionid=abc123` → `Set-Cookie: sessionid=[REDACTED]`,
+`DB_PASSWORD=…` → `DB_PASSWORD=[REDACTED]`).
+
+### Validation stage — التحقق وتقليل النتائج الكاذبة
+
+After every wave, every suspected finding is **re-probed once**
+(the exact URL/header/banner is re-fetched) and either promoted to
+confirmed or downgraded/dropped with a reason. Then **cross-engine
+corroboration**: a finding backed by 2+ independent engines becomes
+confirmed (confidence ≥ 85); a single-signal finding stays suspected
+(indicator). Known false-positive rules: sandbox-proxy TLS artefacts,
+Cloudflare/default-server headers, 403-is-not-a-finding, wildcard-DNS
+artefacts, "200 alone proves nothing".
+
+### False positives — التعامل مع النتائج الكاذبة
+
+```bash
+webdon > findings list 1
+webdon > findings mark-fp 1 F-003 "Cloudflare header, no version"
+webdon > findings unmark 1 F-003
+```
+
+A marked false positive is **excluded from the score** (the score is
+recomputed — fewer real findings means a higher security score), stored
+in SQLite (`finding_fp`: target, finding key, reason, timestamp, scan
+id), and shown in reports as **suppressed — never silently deleted**.
+Unmarking restores it and recomputes the score again.
+
+### CVSS + CWE — التقييم والتصنيف
+
+- **CVSS v3.1** is **computed from the vector string** (`AV/AC/PR/UI/S/C/I/A`)
+  in `webdon/core/cvss.py` — scores are never hardcoded. Verified against
+  published scores: CVE-2014-3566 (POODLE) vector computes **3.4**, a
+  full critical vector computes **10.0** (scope changed) / **9.8** (scope
+  unchanged). Severity bands: None 0.0, Low 0.1–3.9, Medium 4.0–6.9,
+  High 7.0–8.9, Critical 9.0–10.0.
+- **CWE mapping** (`webdon/core/cwe_map.py`): every finding type maps to a
+  CWE id + name + `https://cwe.mitre.org/data/definitions/<id>.html` link
+  and a CVSS vector whose metric values are justified by the evidence
+  (the reasoning is documented in code comments per rule), e.g. missing
+  HSTS → CWE-319, vector `AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N` → 4.8 Medium.
+- **Honesty note:** if a finding type has no defensible mapping, its CVSS
+  is **`null`** and severity comes from the existing scoring — **never an
+  invented number**. Nuclei template classification (`cve-id` / `cwe-id` /
+  `cvss-metrics`) wins over the table; when a CVE id is identified, the
+  public NVD API is consulted (no key, 6 s timeout) for its published
+  CVSS/CWE. Offline or no CVE → mapping table only, stated honestly.
+
+### Precise remediation — الإصلاح الدقيق
+
+Every finding type has an exact fix, filled from the **observed evidence**
+(which URL, which header, which value): the precise header value
+(`Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`),
+the exact config snippet for **nginx AND Apache** where applicable, the
+file/setting to change, and a **verification step** (the exact `webdon`
+command or `curl` to re-run). Generic advice ("enable security headers")
+is not accepted — tests assert every finding type has a non-empty,
+evidence-referencing remediation.
+
+### Professional reporting — التقارير الاحترافية
+
+| Command | Output |
+| ------- | ------ |
+| `report html <id>` | Interactive self-contained HTML (no external JS/CSS): inline SVG severity chart, sortable/filterable findings table, expandable evidence + remediation per finding, executive summary, scope + methodology + limitations, CVSS/CWE columns |
+| `report pdf <id>` | Professional PDF (pure-Python minimal writer, stdlib only): cover page, executive summary, severity distribution, findings table with CVSS/CWE, remediation appendix, scope/limitations/disclaimer |
+| `report json <id>` | Full machine-readable report (findings with evidence/CVSS/CWE/remediation, scores, coverage, timeline refs). The old `--json` flag still writes the raw scan dump |
+| `report compare <id1> <id2>` | New / fixed / persisting / changed findings, score delta, per-finding status incl. `fp-suppressed` |
+| `report timeline <target>` | Chronological history from SQLite: score over time, findings opened/closed per scan, first-seen/last-seen per finding, change events. Per-finding `first_seen`/`last_seen` are stored in `finding_history` (existing rows migrate with `first_seen` = scan date) |
+
+```bash
+python3 webdon.py --hive https://example.com --pdf webdon-report.pdf
+webdon > report pdf 1
+webdon > report compare 1 2
+webdon > report timeline https://example.com
+```
+
 ## Storage
 
 - `webdon-scans.db` — SQLite: one row per scan + one row per engine run.
+- `finding_fp` table — operator false-positive marks (target, finding key, reason, timestamp, scan id).
+- `finding_history` table — per-finding first_seen / last_seen / last scan id (drives `report timeline`).
 - `webdon-scope.json` — remembered signed authorizations.
 - `webdon-settings.json` — language + profile.
-- `webdon-report.json` / `webdon-report.html` — exports.
+- `webdon-report.json` / `webdon-report.html` / `webdon-report.pdf` — exports.
 
 ## Tests
 
@@ -261,7 +384,7 @@ status honest, never invented.
 python3 -m unittest discover -s tests -v
 ```
 
-93 tests, all passing: everything in v1.00 (scope enforcement,
+143 tests, all passing: everything in v1.00 (scope enforcement,
 WHOIS parsing including redacted → UNKNOWN, headers analysis, the
 cookie value-free guarantee, the config-file check never issuing a
 GET or reading a body, CORS analysis, port-scan timeout handling,
@@ -283,4 +406,97 @@ labelling, NetExec `not_applicable` without AD indicators and
 refusal of spraying/brute-force flags, BloodHound bridge +
 import summary counts only (no hashes), the tool manager's five
 new tools, the report's Network & Systems section, and a full
-HIVE run against the lab server (56 phases).
+HIVE run against the lab server (56 phases) — plus v4.00 EVIDENCE
+tests (49): the CVSS v3.1 calculator against independently verified
+vectors (POODLE 3.4, 10.0 / 9.8 / 5.3 / 0.0 anchors, malformed
+vectors), CWE mapping completeness for every finding type,
+evidence-required rejection, the validation stage (promotion /
+demotion / corroboration / known-FP rules), persistent FP marking
+with score recompute, precise remediation for every finding type,
+interactive HTML (sortable table + SVG chart + evidence blocks),
+professional PDF (`%PDF` magic + title), the JSON report schema,
+scan comparison (new / fixed / persisting), the timeline (ordering +
+first/last seen), and the sanitizer stripping secrets from evidence
+fields (cookie value + `.env` secret → `[REDACTED]`).
+
+## v5.00 DEEP-DIVE — recursive investigation
+
+التحقيق العميق التكراري — عندما يجد الفحص نتيجة، يتابعها بأدلة أعمق على نفس النتيجة بالضبط، وعندما تجد تلك الأدلة المزيد، يذهب أعمق مرة أخرى. نفس الأمر الواحد (`hive <url>`)، بدون إدخال إضافي.
+
+### Deep-dive model — نموذج التحقيق العميق
+
+After the six HIVE waves, the deep-dive stage walks the findings
+level by level: L0 findings → L1 follow-ups → L2 → L3. Every
+finding gains four fields:
+
+| Field | Meaning |
+| ----- | ------- |
+| `depth` | 0 for L0 findings, 1–3 (up to 5) for follow-ups |
+| `parent_id` | the finding it followed up (`null` for L0) |
+| `follow_ups` | probe ids run because of this finding |
+| `chain` | stable path, e.g. `F-014/F-023/F-026` |
+
+Chains survive in SQLite (old scans migrate: depth 0, parent
+null) and appear in the terminal report, the JSON report
+(`deepdive` + `finding_chains`) and the HTML report (collapsible
+trees). New commands: `deep <url>` (hive + deep-dive, depth 3),
+`report chains <scan-id>`, `findings chain <scan-id> <finding-id>`.
+
+### Worked chain example — مثال سلسلة
+
+From a real lab-server hive run (depth 3):
+
+```
+F-014 [LOW|depth 0] Server version disclosed (F-014)
+  via probes: P-ed21966d
+  F-023 [INFO|depth 1] Basehttp version detected: 0.6 (F-014/F-023)
+    via probes: P-9c55f176
+    F-026 [INFO|depth 2] NVD lookup unavailable for basehttp 0.6 (cve_unknown) (F-014/F-023/F-026)
+```
+
+The server header disclosed a version → the dive detected the
+exact version from headers/meta → it looked the version up on
+the public NVD API (6 s timeout; offline → `cve_unknown`, never
+an invented CVE). A probe that finds nothing ends its branch.
+
+### Follow-up playbooks — خطط المتابعة
+
+| Finding | Follow-ups |
+| ------- | ---------- |
+| Missing security header | audit that header on EVERY crawled page + related headers on the same pages |
+| Open port | banner grab + service/version id + NVD CVE lookup for the version + neighbouring ports |
+| Subdomain found | mini-scan: DNS, TLS cert, headers, liveness |
+| Exposed config / sensitive path (HEAD 200) | HEAD-check sibling paths of the same family + robots/sitemap reference check (HEAD only, body never downloaded) |
+| Cookie missing a flag | audit ALL cookies on ALL crawled pages for that flag |
+| Weak TLS version/cipher | enumerate every TLS version + cipher offered + full cert chain details |
+| Tech/CMS detected | version detection + theme/plugin detection (names only) + NVD lookup for the version |
+| WHOIS org/registrar found | RDAP record + ASN + hosting neighbours (public data) |
+| CORS wildcard | OPTIONS preflight on the site's API paths (detection only, no credentials) |
+| Nuclei finding | re-probe the exact URL/template once + related templates of the same family (same CWE) |
+| IP found | reverse DNS + ASN + geolocation + hosting; other IPs from DNS get their own follow-ups |
+
+### Bounds — الحدود (the dive can never run forever)
+
+| Bound | Default | Change |
+| ----- | ------- | ------ |
+| Max depth | 3 levels | `hive <url> --depth N` / `--depth N` (1–5; outside clamps with a warning) |
+| Probe budget | 200 follow-up probes per scan | `deepdive_probe_budget` in settings |
+| Time budget | 600 s for the deep-dive stage | `deepdive_time_budget_s` in settings |
+
+A deduplication registry guarantees the exact same probe (same
+type + target + parameters) is NEVER run twice in one scan. When
+a budget stops the dive, the report states exactly which one:
+`depth_limit` / `probe_budget` / `time_budget` — never silently
+truncated. A neighbour-port finding never spawns further
+neighbours, and a bare TCP answer with no banner (firewall /
+egress proxy answering SYNs) is not a finding.
+
+### Scoring — النتيجة
+
+Deep-dive findings score exactly like normal findings (confirmed
+full, suspected half, FP-marked excluded). The score does NOT
+inflate because the dive found more: an audit finding reuses the
+canonical engine title, so the same problem has the same
+`finding_key` at any depth — the shallowest occurrence is kept,
+the deeper one is linked to it, and a confirmed re-probe only
+promotes the shallow finding (indicator → confirmed).

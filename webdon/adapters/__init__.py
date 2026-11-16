@@ -18,6 +18,7 @@ no shell=True, and every run has a timeout.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 
@@ -29,6 +30,38 @@ SENSITIVE_KEYS = {
     "auth", "authorization", "cookie", "set-cookie", "session",
     "sessionid", "session_id", "csrf", "private_key", "access_key",
 }
+
+# Value patterns redacted inside strings (v4.00): a credential or
+# session value embedded in an evidence string must be scrubbed
+# even when it is not under a sensitive key — e.g. a Set-Cookie
+# header line or a `DB_PASSWORD=...` assignment pasted into
+# evidence. Placeholder values such as `<value>` in remediation
+# templates are NOT redacted (a value must not start with `<`).
+_VALUE_PATTERNS = [
+    # Authorization: Bearer/Basic <token>
+    (re.compile(r"(authorization\s*:\s*(?:bearer|basic)\s+)\S+",
+                re.IGNORECASE), r"\1[REDACTED]"),
+    # Set-Cookie: <name>=<value>
+    (re.compile(r"(set-cookie\s*:\s*[^\s=;]+)=([^<\s;,][^\s;,]*)",
+                re.IGNORECASE), r"\1=[REDACTED]"),
+    # sensitive-name = value  (sessionid, token, password, secret,
+    # api_key, auth, csrf, access_key, ...)
+    (re.compile(r"((?:sessionid|session_id|session|token|password|"
+                r"passwd|pwd|secret|api[_-]?key|apikey|auth|csrf|"
+                r"access[_-]?key|private[_-]?key)\s*[:=]\s*)"
+                r"[^<\s;,\"'}&]+", re.IGNORECASE), r"\1[REDACTED]"),
+    # env-style assignments: DB_PASSWORD=... / API_TOKEN=...
+    (re.compile(r"((?:[A-Z0-9_]*?(?:PASSWORD|SECRET|TOKEN|"
+                r"API[_-]?KEY))\s*=\s*)[^<\s;,\"'}&]+",
+                re.IGNORECASE), r"\1[REDACTED]"),
+]
+
+
+def _redact_values(text):
+    """Scrub credential/session values out of a free-text string."""
+    for pattern, repl in _VALUE_PATTERNS:
+        text = pattern.sub(repl, text)
+    return text
 
 # Keys that may carry raw bodies / full requests — dropped entirely.
 BODY_KEYS = {"request", "response", "raw", "body", "raw_response",
@@ -85,9 +118,11 @@ def version_of(binary, args=("--version",), timeout=20):
 def sanitize(obj):
     """Recursively strip sensitive values and raw bodies from data.
 
-    Drops any key in SENSITIVE_KEYS or BODY_KEYS (any depth), and
-    truncates long strings. Returns a clean copy; the input is
-    never mutated.
+    Drops any key in SENSITIVE_KEYS or BODY_KEYS (any depth),
+    redacts credential/session values embedded in strings
+    (Set-Cookie values, `name=value` for sensitive names,
+    `Authorization: Bearer ...`, `DB_PASSWORD=...`), and truncates
+    long strings. Returns a clean copy; the input is never mutated.
     """
     if isinstance(obj, dict):
         clean = {}
@@ -100,7 +135,7 @@ def sanitize(obj):
     if isinstance(obj, (list, tuple)):
         return [sanitize(v) for v in obj]
     if isinstance(obj, str):
-        return obj[:500]
+        return _redact_values(obj[:500])
     return obj
 
 

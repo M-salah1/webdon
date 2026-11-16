@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""WEBDON v3.00 NET tests — run: python3 -m unittest discover -s tests -v
+"""WEBDON v4.00 EVIDENCE tests — run: python3 -m unittest discover -s tests -v
 
 Covers: hive now 6 waves / >=55 phases / 24 engines, Nmap XML
 parsing (identified only when a banner/version was read) and
@@ -47,7 +47,7 @@ def _ctx(url="http://127.0.0.1:9", authorized=True, **extra):
 
 class TestVersionAndHiveStructure(unittest.TestCase):
     def test_version_is_3_00(self):
-        self.assertEqual(__version__, "3.00")
+        self.assertEqual(__version__, "5.00")
 
     def test_hive_has_6_waves_55_plus_phases_24_engines(self):
         self.assertEqual(len(hive_mod.wave_names()), 6)
@@ -440,7 +440,7 @@ class TestHiveLabNet(unittest.TestCase):
             scan = hive_mod.run_hive(
                 base, scope=scope,
                 settings={"scan_budget_s": 240})
-            self.assertEqual(scan["tool"], "WEBDON v3.00")
+            self.assertEqual(scan["tool"], "WEBDON v5.00")
             self.assertEqual(scan["kind"], "webdon-hive")
             self.assertEqual(scan["profile"], "hive")
             self.assertIsNotNone(scan["score"])

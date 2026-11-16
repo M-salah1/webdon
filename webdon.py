@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""WEBDON v3.00 HIVE — entry point.
+"""WEBDON v5.00 DEEP-DIVE — entry point.
 
 Terminal console (Arabic / French / English) + direct scan mode.
     python3 webdon.py                                  # console
     python3 webdon.py --scan https://example.com
     python3 webdon.py --hive https://example.com       # HIVE: everything
+    python3 webdon.py --hive https://example.com --depth 2
     python3 webdon.py --hive https://example.com --schema api.yaml
+    python3 webdon.py --hive https://example.com --pdf report.pdf
 
 A signed scope is required before any scan:
     webdon > scope create https://example.com
@@ -29,6 +31,7 @@ from webdon.adapters import neo as neo_mod  # noqa: E402
 from webdon.adapters import netexec as netexec_mod  # noqa: E402
 from webdon.adapters import openvas as openvas_mod  # noqa: E402
 from webdon.adapters import zap as zap_mod  # noqa: E402
+from webdon.core import deepdive as deepdive_mod  # noqa: E402
 from webdon.core import engine as engine_mod  # noqa: E402
 from webdon.core import hive as hive_mod  # noqa: E402
 from webdon.core import report as report_mod  # noqa: E402
@@ -55,7 +58,7 @@ WEBDON_BANNER = r"""
 
 WELCOME = {
     "ar": [
-        "WEBDON v3.00 HIVE — أداة فحص المواقع الثقيلة",
+        "WEBDON v5.00 DEEP-DIVE — أداة فحص المواقع الثقيلة",
         "نظام التحقيق الدفاعي الشامل — FOX COMPANY",
         "المطور: حافظ مهدي صلاح الدين — الجزائر",
         "",
@@ -66,7 +69,7 @@ WELCOME = {
         "  والخط الزمني — مع التحقق من كلمات السر المسرّبة (HIBP)",
         "• تعريف صاحب الموقع من السجلات العامة فقط (UNKNOWN إن حُجب)",
         "• بلد الموقع ومزوّد الاستضافة من الـ IP العام",
-        "• تقارير JSON/HTML وحفظ كل فحص في قاعدة بيانات",
+        "• تقارير JSON/HTML/PDF وحفظ كل فحص في قاعدة بيانات",
         "",
         "كيف تعمل؟",
         "1) وقّع الإذن:  scope create https://example.com",
@@ -79,7 +82,7 @@ WELCOME = {
         "والأداة تُبلغ عنها UNKNOWN ولا تخترع أرقاماً أبداً.",
     ],
     "en": [
-        "WEBDON v3.00 HIVE — Heavy Website Investigation Tool",
+        "WEBDON v5.00 DEEP-DIVE — Heavy Website Investigation Tool",
         "Comprehensive defensive audit system — FOX COMPANY",
         "Developer: Hafed Mehdi Salah Eddine — Algeria",
         "",
@@ -90,7 +93,7 @@ WELCOME = {
         "  and timeline — plus leaked-password verification (HIBP)",
         "• Site owner from public records only (UNKNOWN if redacted)",
         "• Site country and hosting provider from the public IP",
-        "• JSON/HTML reports and every scan saved in a database",
+        "• JSON/HTML/PDF reports and every scan saved in a database",
         "",
         "How to work?",
         "1) Sign authorization:  scope create https://example.com",
@@ -104,7 +107,7 @@ WELCOME = {
         "numbers.",
     ],
     "fr": [
-        "WEBDON v3.00 HIVE — Outil lourd d'investigation de sites web",
+        "WEBDON v5.00 DEEP-DIVE — Outil lourd d'investigation de sites web",
         "Système complet d'audit défensif — FOX COMPANY",
         "Développeur : Hafed Mehdi Salah Eddine — Algérie",
         "",
@@ -116,7 +119,7 @@ WELCOME = {
         "• Propriétaire du site depuis les registres publics uniquement",
         "  (UNKNOWN si masqué)",
         "• Pays du site et hébergeur depuis l'IP publique",
-        "• Rapports JSON/HTML et chaque scan sauvé en base de données",
+        "• Rapports JSON/HTML/PDF et chaque scan sauvé en base de données",
         "",
         "Comment l'utiliser ?",
         "1) Signez l'autorisation :  scope create https://example.com",
@@ -289,8 +292,36 @@ def record_scan_traffic(scan):
         pass
 
 
-def do_hive(url, lang, scope, settings, schema_path=None):
-    """HIVE: one command runs all six waves. Scope-gated."""
+def _parse_depth_arg(arg, default=None):
+    """Split `--depth N` out of a console argument string.
+
+    Returns (rest, depth, warned). Values outside 1-5 clamp
+    with a warning (deepdive.clamp_depth)."""
+    parts = (arg or "").split()
+    depth = default
+    warned = False
+    out = []
+    i = 0
+    while i < len(parts):
+        if parts[i] == "--depth" and i + 1 < len(parts):
+            depth, warned = deepdive_mod.clamp_depth(parts[i + 1])
+            i += 2
+        else:
+            out.append(parts[i])
+            i += 1
+    return " ".join(out), depth, warned
+
+
+def do_hive(url, lang, scope, settings, schema_path=None, depth=None):
+    """HIVE: one command runs all six waves + the deep-dive.
+
+    Scope-gated. `hive <url> --depth N` caps the dive (1-5,
+    default 3); `deep <url>` is hive with depth 3."""
+    url, arg_depth, warned = _parse_depth_arg(url)
+    if arg_depth is not None:
+        depth = arg_depth
+    if warned:
+        print("depth clamped to 1-5 (requested value out of range)")
     url = normalize_url(url)
     if not valid_url(url):
         print(t(lang, "invalid_url"))
@@ -307,7 +338,7 @@ def do_hive(url, lang, scope, settings, schema_path=None):
     try:
         scan = hive_mod.run_hive(url, scope=scope, settings=settings,
                                  progress=spin.progress,
-                                 schema_path=schema_path)
+                                 schema_path=schema_path, depth=depth)
     except PermissionError as exc:
         print(str(exc))
     finally:
@@ -633,7 +664,7 @@ def scanner_cmd(arg, lang):
 def dashboard(scan, lang):
     while True:
         print("-" * 60)
-        print("0. %s    1. %s    2. JSON    3. HTML    4. %s" % (
+        print("0. %s    1. %s    2. JSON    3. HTML    4. %s    5. PDF" % (
             t(lang, "back"), t(lang, "findings"), t(lang, "verify")))
         try:
             choice = input("%s " % t(lang, "enter_choice")).strip()
@@ -654,6 +685,9 @@ def dashboard(scan, lang):
             print("Saved: %s" % path)
         elif choice == "4":
             do_verify(lang)
+        elif choice == "5":
+            path = report_mod.to_pdf(scan, "webdon-report.pdf")
+            print("Saved: %s" % path)
 
 
 def do_verify(lang):
@@ -779,20 +813,7 @@ def compare_cmd(arg, lang):
         print("scan not found — type history")
         return
     diff = storage_mod.compare_scans(a, b)
-    print("=" * 60)
-    print("Compare #%s -> #%s" % (parts[0], parts[1]))
-    print("Score: %s -> %s    Coverage: %s%% -> %s%%" % (
-        diff["score"][0], diff["score"][1],
-        diff["coverage"][0], diff["coverage"][1]))
-    for f in diff["added"]:
-        print("  + [%s] %s" % (f["severity"].upper(), f["name"]))
-    for f in diff["removed"]:
-        print("  - [%s] %s" % (f["severity"].upper(), f["name"]))
-    for c in diff["changed"]:
-        print("  ~ %s: %s -> %s" % (c["name"], c["from"], c["to"]))
-    if not diff["added"] and not diff["removed"] and not diff["changed"]:
-        print("  (no changes)")
-    print("=" * 60)
+    report_mod.print_compare(diff, parts[0], parts[1])
 
 
 def resume_cmd(arg, lang, scope):
@@ -832,12 +853,154 @@ def summary_cmd(arg, lang):
     print(summary_mod.format_summary(summary, lang))
 
 
+def findings_cmd(arg, lang):
+    """v4.00 — operator false-positive handling.
+    findings list <id>
+    findings mark-fp <id> <finding-id> <reason>
+    findings unmark <id> <finding-id>
+    findings chain <id> <finding-id> | chain <finding-id> (latest
+    scan) — v5.00: one investigation tree."""
+    parts = arg.split(None, 3)
+    if not parts:
+        print("findings list <id> | mark-fp <id> <F-001> <reason> | "
+              "unmark <id> <F-001> | chain <id> <F-001>")
+        return
+    sub = parts[0]
+    if sub == "chain" and len(parts) >= 2:
+        if len(parts) >= 3:
+            try:
+                scan_id = int(parts[1])
+            except ValueError:
+                print("findings chain <id> <F-001>")
+                return
+            fid = parts[2]
+        else:
+            recent = storage_mod.list_scans(DB_FILE, limit=1)
+            if not recent:
+                print("no scans yet — run hive first")
+                return
+            scan_id = recent[0]["id"]
+            fid = parts[1]
+        scan = storage_mod.get_scan(DB_FILE, scan_id)
+        if not scan:
+            print("scan not found — type history")
+            return
+        report_mod.print_finding_chain(scan, fid)
+        return
+    if sub == "list" and len(parts) >= 2:
+        try:
+            scan_id = int(parts[1])
+        except ValueError:
+            print("findings list <id>")
+            return
+        scan = storage_mod.get_scan(DB_FILE, scan_id)
+        if not scan:
+            print("scan not found — type history")
+            return
+        print("=" * 60)
+        print("Findings — #%d %s" % (scan_id, scan.get("target")))
+        for f in scan.get("findings") or []:
+            cvss = f.get("cvss") or {}
+            print("  %s [%s] %s  CVSS=%s" % (
+                f.get("finding_id", "?"), f["severity"].upper(),
+                f["name"],
+                "%.1f" % cvss["score"] if cvss.get("score") is not None
+                else "—"))
+            print("      %s" % (f.get("evidence", "")[:150]))
+        if scan.get("false_positives"):
+            print("Suppressed false positives:")
+            for fp in scan["false_positives"]:
+                print("  %s [FP] %s — %s" % (
+                    fp.get("finding_id", "?"), fp["name"],
+                    fp.get("fp_reason", "")))
+        print("=" * 60)
+        return
+    if sub == "mark-fp" and len(parts) >= 4:
+        try:
+            scan_id = int(parts[1])
+        except ValueError:
+            print("findings mark-fp <id> <finding-id> <reason>")
+            return
+        ok, reason = storage_mod.mark_fp(DB_FILE, scan_id, parts[2],
+                                         parts[3])
+        print(reason if not ok else
+              "marked %s as false positive (score recomputed)" % parts[2])
+        return
+    if sub == "unmark" and len(parts) >= 3:
+        try:
+            scan_id = int(parts[1])
+        except ValueError:
+            print("findings unmark <id> <finding-id>")
+            return
+        ok, reason = storage_mod.unmark_fp(DB_FILE, scan_id, parts[2])
+        print(reason if not ok else
+              "restored %s (score recomputed)" % parts[2])
+        return
+    print("findings list <id> | mark-fp <id> <F-001> <reason> | "
+          "unmark <id> <F-001> | chain <id> <F-001>")
+
+
 def report_cmd(arg, lang):
-    """report generate <id> [json|html] — export a stored scan.
-    report list — list stored scans."""
+    """report list — list stored scans.
+    report generate <id> [json|html] — export a stored scan (v3.00).
+    report html|pdf|json <id> — professional report (v4.00).
+    report compare <id1> <id2> — new / fixed / persisting (v4.00).
+    report timeline <target> — history of one target (v4.00).
+    report chains <id> — every investigation tree (v5.00)."""
     parts = arg.split()
     if not parts or parts[0] == "list":
         show_history(lang)
+        return
+    if parts[0] == "compare" and len(parts) >= 3:
+        try:
+            a = storage_mod.get_scan(DB_FILE, int(parts[1]))
+            b = storage_mod.get_scan(DB_FILE, int(parts[2]))
+        except ValueError:
+            a = b = None
+        if not a or not b:
+            print("scan not found — type history")
+            return
+        report_mod.print_compare(storage_mod.compare_scans(a, b),
+                                 parts[1], parts[2])
+        return
+    if parts[0] == "chains" and len(parts) >= 2:
+        try:
+            scan_id = int(parts[1])
+        except ValueError:
+            print("report chains <id>")
+            return
+        scan = storage_mod.get_scan(DB_FILE, scan_id)
+        if not scan:
+            print("scan not found — type history")
+            return
+        report_mod.print_chains(scan)
+        return
+    if parts[0] == "timeline" and len(parts) >= 2:
+        tl = storage_mod.timeline(DB_FILE, parts[1])
+        if not tl["scans"]:
+            print("no scans for %s" % parts[1])
+            return
+        report_mod.print_timeline(tl)
+        return
+    if parts[0] in ("html", "pdf", "json") and len(parts) >= 2:
+        try:
+            scan_id = int(parts[1])
+        except ValueError:
+            print("report %s <id>" % parts[0])
+            return
+        scan = storage_mod.get_scan(DB_FILE, scan_id)
+        if not scan:
+            print("scan not found — type history")
+            return
+        fmt = parts[0]
+        path = "webdon-report-%d.%s" % (scan_id, fmt)
+        if fmt == "html":
+            report_mod.to_html(scan, path)
+        elif fmt == "pdf":
+            report_mod.to_pdf(scan, path)
+        else:
+            report_mod.to_json_report(scan, path)
+        print("Saved: %s" % path)
         return
     if parts[0] == "generate" and len(parts) >= 2:
         try:
@@ -857,7 +1020,8 @@ def report_cmd(arg, lang):
             report_mod.to_json(scan, path)
         print("Saved: %s" % path)
         return
-    print("report list | report generate <id> [json|html]")
+    print("report list | generate <id> [json|html] | html|pdf|json <id> | "
+          "compare <a> <b> | timeline <target> | chains <id>")
 
 
 def scope_cmd(arg, lang, scope):
@@ -894,6 +1058,8 @@ def print_help(lang):
     print("  scope create <url> — %s" % t(lang, "help_scope"))
     print("  scope list         — %s" % t(lang, "scope_list"))
     print("  hive <url> / auto  — HIVE: every tool, one command (6 waves)")
+    print("  hive <url> --depth N — HIVE + deep-dive, depth 1-5 (default 3)")
+    print("  deep <url> [--depth N] — hive + deep-dive (same as hive, depth 3)")
     print("  tools list | tools check <n> | tools install <n>")
     print("  zap export <url>   — ZAP context + PC plan")
     print("  zap run <url>      — run ZAP only if installed (PC)")
@@ -912,6 +1078,14 @@ def print_help(lang):
     print("  verify             — %s" % t(lang, "help_verify"))
     print("  report list        — %s" % t(lang, "help_history"))
     print("  report generate <id> [json|html] — export a stored scan")
+    print("  report html|pdf|json <id> — professional report (v4.00)")
+    print("  report compare <a> <b> — new / fixed / persisting findings")
+    print("  report timeline <target> — score & findings over time")
+    print("  report chains <id> — every investigation tree (deep-dive)")
+    print("  findings list <id> — findings with ids (for mark-fp)")
+    print("  findings chain <id> <F-001> — one investigation tree")
+    print("  findings mark-fp <id> <F-001> <reason> — suppress a FP")
+    print("  findings unmark <id> <F-001> — restore a suppressed FP")
     print("  compare <a> <b>    — %s" % t(lang, "help_compare"))
     print("  resume <id>        — %s" % t(lang, "help_resume"))
     print("  summary <id>       — Executive summary of a stored scan")
@@ -990,6 +1164,8 @@ def console():
             do_verify(lang)
         elif cmd == "report":
             report_cmd(arg, lang)
+        elif cmd == "findings":
+            findings_cmd(arg, lang)
         elif cmd == "compare":
             compare_cmd(arg, lang)
         elif cmd == "resume":
@@ -1018,6 +1194,15 @@ def console():
                 except (EOFError, KeyboardInterrupt):
                     continue
             scan = do_hive(arg, lang, scope, settings)
+            if scan:
+                dashboard(scan, lang)
+        elif cmd == "deep":
+            if not arg:
+                try:
+                    arg = input("%s " % t(lang, "enter_url")).strip()
+                except (EOFError, KeyboardInterrupt):
+                    continue
+            scan = do_hive(arg, lang, scope, settings, depth=3)
             if scan:
                 dashboard(scan, lang)
         elif cmd == "tools":
@@ -1058,6 +1243,8 @@ def main(argv):
     url = None
     json_out = None
     html_out = None
+    pdf_out = None
+    depth = None
     scan_flag = False
     hive_flag = False
     schema_path = None
@@ -1071,6 +1258,12 @@ def main(argv):
         elif a == "--hive" and i + 1 < len(argv):
             hive_flag = True
             url = argv[i + 1]
+            i += 2
+        elif a == "--depth" and i + 1 < len(argv):
+            depth, _warned = deepdive_mod.clamp_depth(argv[i + 1])
+            if _warned:
+                print("depth clamped to 1-5 (requested value out of "
+                      "range)")
             i += 2
         elif a == "--schema" and i + 1 < len(argv):
             schema_path = argv[i + 1]
@@ -1086,6 +1279,9 @@ def main(argv):
             i += 2
         elif a == "--html" and i + 1 < len(argv):
             html_out = argv[i + 1]
+            i += 2
+        elif a == "--pdf" and i + 1 < len(argv):
+            pdf_out = argv[i + 1]
             i += 2
         elif not a.startswith("-"):
             url = a
@@ -1108,7 +1304,7 @@ def main(argv):
     try:
         if hive_flag:
             scan = hive_mod.run_hive(url, scope=scope, settings=settings,
-                                     schema_path=schema_path)
+                                     schema_path=schema_path, depth=depth)
             print("HIVE waves: %s" % " -> ".join(hive_mod.wave_names()))
             for name, info in (scan.get("hive") or {}).get(
                     "adapters", {}).items():
@@ -1129,6 +1325,8 @@ def main(argv):
         print("Saved: %s" % report_mod.to_json(scan, json_out))
     if html_out:
         print("Saved: %s" % report_mod.to_html(scan, html_out))
+    if pdf_out:
+        print("Saved: %s" % report_mod.to_pdf(scan, pdf_out))
     return 0
 
 

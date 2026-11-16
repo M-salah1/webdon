@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""WEBDON v3.00 NET tests — run: python3 -m unittest discover -s tests -v
+"""WEBDON v4.00 EVIDENCE tests — run: python3 -m unittest discover -s tests -v
 
 Covers: hive phase counts and scope enforcement, adapter
 argument construction (Nuclei excludes dos, Naabu fallback flag,
@@ -42,7 +42,7 @@ def _ctx(url="http://127.0.0.1:9", authorized=True):
 
 class TestVersion(unittest.TestCase):
     def test_version_is_2_00(self):
-        self.assertEqual(__version__, "3.00")
+        self.assertEqual(__version__, "5.00")
 
 
 class TestHiveStructure(unittest.TestCase):
@@ -293,7 +293,7 @@ class TestHiveLab(unittest.TestCase):
             scan = hive_mod.run_hive(
                 base, scope=scope,
                 settings={"scan_budget_s": 180})
-            self.assertEqual(scan["tool"], "WEBDON v3.00")
+            self.assertEqual(scan["tool"], "WEBDON v5.00")
             self.assertEqual(scan["kind"], "webdon-hive")
             self.assertEqual(scan["profile"], "hive")
             self.assertIsNotNone(scan["score"])

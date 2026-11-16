@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""WEBDON v3.00 NET tests — run: python3 -m unittest discover -s tests -v
+"""WEBDON v4.00 EVIDENCE tests — run: python3 -m unittest discover -s tests -v
 
 Covers: scope enforcement, WHOIS parsing, headers analysis, the
 cookie value-free guarantee, the config-file check never reading
@@ -418,7 +418,7 @@ class TestLabScan(unittest.TestCase):
             scan = engine_mod.run_scan(
                 base, profile="deep", scope=scope,
                 settings={"scan_budget_s": 120})
-            self.assertEqual(scan["tool"], "WEBDON v3.00")
+            self.assertEqual(scan["tool"], "WEBDON v5.00")
             self.assertEqual(scan["profile"], "deep")
             self.assertIsNotNone(scan["score"])
             self.assertGreaterEqual(
